@@ -60,7 +60,7 @@ async function installDependencies(workspacePath: string, language: string, sess
       if (existsSync(reqFile)) {
         await addEvent(sessionId, "thought", "Installing Python dependencies from requirements.txt...", 0);
         const { stdout, stderr } = await execAsync(
-          `pip install -r "${reqFile}" --quiet --no-warn-script-location 2>&1`,
+          `pip3 install -r "${reqFile}" --quiet --no-warn-script-location 2>&1`,
           { timeout: 60000 }
         );
         const out = (stdout + stderr).trim();
@@ -87,7 +87,7 @@ async function installDependencies(workspacePath: string, language: string, sess
         if (imports.size > 0) {
           const pkgList = [...imports].join(" ");
           await addEvent(sessionId, "thought", `Installing detected Python packages: ${pkgList}`, 0);
-          await execAsync(`pip install ${pkgList} --quiet --no-warn-script-location 2>&1`, { timeout: 60000 });
+          await execAsync(`pip3 install ${pkgList} --quiet --no-warn-script-location 2>&1`, { timeout: 60000 });
         }
       }
     } else if (language === "javascript" || language === "typescript") {
@@ -121,9 +121,9 @@ async function runTests(workspacePath: string, language: string): Promise<{ pass
     })();
 
     if (hasTestFiles) {
-      cmd = `cd "${workspacePath}" && timeout 30 python -m pytest -v --tb=short 2>&1 || true`;
+      cmd = `cd "${workspacePath}" && timeout 30 python3 -m pytest -v --tb=short 2>&1 || true`;
     } else {
-      cmd = `cd "${workspacePath}" && timeout 30 python main.py 2>&1 || true`;
+      cmd = `cd "${workspacePath}" && timeout 30 python3 main.py 2>&1 || true`;
     }
   } else if (language === "typescript") {
     const hasPkg = existsSync(join(workspacePath, "package.json"));

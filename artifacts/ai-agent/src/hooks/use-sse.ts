@@ -8,7 +8,7 @@ export function useSSE(sessionId: number | undefined) {
   useEffect(() => {
     if (!sessionId) return;
 
-    setEvents([]); // Reset events when session changes
+    setEvents([]);
     const eventSource = new EventSource(`/api/agent/sessions/${sessionId}/stream`);
 
     eventSource.onopen = () => {
@@ -17,19 +17,29 @@ export function useSSE(sessionId: number | undefined) {
 
     eventSource.onmessage = (event) => {
       try {
-        const parsedEvent = JSON.parse(event.data) as AgentEvent;
-        setEvents((prev) => {
-          // Avoid duplicates if we receive them
-          if (prev.some((e) => e.id === parsedEvent.id)) return prev;
-          return [...prev, parsedEvent].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-        });
+        const parsed = JSON.parse(event.data);
+        // Only add actual agent events (they have an id and createdAt)
+        if (
+          parsed &&
+          typeof parsed.id === "number" &&
+          parsed.createdAt &&
+          parsed.type &&
+          !["status", "complete", "error"].includes(parsed.type === "status" || parsed.type === "complete" ? parsed.type : "")
+        ) {
+          const agentEvent = parsed as AgentEvent;
+          setEvents((prev) => {
+            if (prev.some((e) => e.id === agentEvent.id)) return prev;
+            return [...prev, agentEvent].sort(
+              (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            );
+          });
+        }
       } catch (e) {
         console.error("Failed to parse SSE event", e);
       }
     };
 
-    eventSource.onerror = (error) => {
-      console.error("SSE connection error", error);
+    eventSource.onerror = () => {
       setIsConnected(false);
       eventSource.close();
     };

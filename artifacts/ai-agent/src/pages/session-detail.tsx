@@ -16,17 +16,25 @@ import {
   getGetGitStatusQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, isValid } from "date-fns";
 import { useSSE } from "@/hooks/use-sse";
+
 import {
   Terminal, ArrowLeft, Square, FileCode, CheckCircle2,
   XCircle, GitBranch, Loader2, Activity, RefreshCw, Download,
   Pencil, Save, X as XIcon,
 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+function safeFormat(value: string | undefined | null, fmt: string, fallback = "--:--:--"): string {
+  if (!value) return fallback;
+  const d = new Date(value);
+  return isValid(d) ? format(d, fmt) : fallback;
+}
 
 export default function SessionDetail() {
   const [, params] = useRoute("/sessions/:id");
@@ -372,7 +380,7 @@ export default function SessionDetail() {
                         [{event.type}]
                       </span>
                       <span className="font-mono text-[9px] text-muted-foreground/50">
-                        {format(new Date(event.createdAt), "HH:mm:ss")}
+                        {safeFormat(event.createdAt, "HH:mm:ss")}
                       </span>
                       {event.iteration > 0 && (
                         <span className="font-mono text-[9px] text-muted-foreground/40 border border-border px-1">
@@ -440,7 +448,7 @@ export default function SessionDetail() {
                             Iteration {test.iteration}
                           </span>
                           <span className="font-mono text-[9px] text-muted-foreground ml-auto">
-                            {format(new Date(test.createdAt), "HH:mm:ss")}
+                            {safeFormat(test.createdAt, "HH:mm:ss")}
                           </span>
                         </div>
                         <div className="p-2 font-mono text-[10px] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">
