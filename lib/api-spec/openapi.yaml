@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AI Coding Agent API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: agent
+    description: AI coding agent sessions
+  - name: openai
+    description: OpenAI chat integration
 paths:
   /healthz:
     get:
@@ -24,6 +28,319 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /agent/sessions:
+    get:
+      operationId: listSessions
+      tags: [agent]
+      summary: List all agent sessions
+      responses:
+        "200":
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+    post:
+      operationId: createSession
+      tags: [agent]
+      summary: Create a new agent session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionBody"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+
+  /agent/sessions/{id}:
+    get:
+      operationId: getSession
+      tags: [agent]
+      summary: Get session details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSession
+      tags: [agent]
+      summary: Delete a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /agent/sessions/{id}/cancel:
+    post:
+      operationId: cancelSession
+      tags: [agent]
+      summary: Cancel a running session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /agent/sessions/{id}/files:
+    get:
+      operationId: listSessionFiles
+      tags: [agent]
+      summary: List files for a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentFile"
+
+  /agent/sessions/{id}/events:
+    get:
+      operationId: listSessionEvents
+      tags: [agent]
+      summary: List all agent events for a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentEvent"
+
+  /agent/sessions/{id}/test-results:
+    get:
+      operationId: listTestResults
+      tags: [agent]
+      summary: Get test results for a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Test results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TestResult"
+
+  /agent/stats:
+    get:
+      operationId: getAgentStats
+      tags: [agent]
+      summary: Get aggregate agent stats
+      responses:
+        "200":
+          description: Stats summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentStats"
+
+  /agent/sessions/{id}/git/status:
+    get:
+      operationId: getGitStatus
+      tags: [agent]
+      summary: Get git status for a session's workspace
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Git status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitStatus"
+
+  /agent/sessions/{id}/git/log:
+    get:
+      operationId: getGitLog
+      tags: [agent]
+      summary: Get git commit log for a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Git log entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GitCommit"
+
+  /agent/sessions/{id}/git/commit:
+    post:
+      operationId: gitCommit
+      tags: [agent]
+      summary: Commit current changes in a session workspace
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitCommitBody"
+      responses:
+        "200":
+          description: Commit created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitStatus"
+
+  /openai/conversations:
+    get:
+      operationId: listConversations
+      tags: [openai]
+      summary: List conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [openai]
+      summary: Create a conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConversationBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+
+  /openai/conversations/{id}/messages:
+    get:
+      operationId: listMessages
+      tags: [openai]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: sendMessage
+      tags: [openai]
+      summary: Send a message (SSE streaming)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendOpenaiMessageBody"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +351,294 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    CreateSessionBody:
+      type: object
+      properties:
+        task:
+          type: string
+        language:
+          type: string
+          enum: [python, javascript, typescript]
+      required:
+        - task
+        - language
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: integer
+        task:
+          type: string
+        language:
+          type: string
+        status:
+          type: string
+          enum: [pending, planning, coding, testing, iterating, done, failed, cancelled]
+        iterations:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - task
+        - language
+        - status
+        - iterations
+        - createdAt
+        - updatedAt
+
+    SessionDetail:
+      type: object
+      properties:
+        id:
+          type: integer
+        task:
+          type: string
+        language:
+          type: string
+        status:
+          type: string
+          enum: [pending, planning, coding, testing, iterating, done, failed, cancelled]
+        iterations:
+          type: integer
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentFile"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentEvent"
+        testResults:
+          type: array
+          items:
+            $ref: "#/components/schemas/TestResult"
+      required:
+        - id
+        - task
+        - language
+        - status
+        - iterations
+        - createdAt
+        - updatedAt
+        - files
+        - events
+        - testResults
+
+    AgentFile:
+      type: object
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: integer
+        name:
+          type: string
+        content:
+          type: string
+        language:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - sessionId
+        - name
+        - content
+        - language
+        - createdAt
+        - updatedAt
+
+    AgentEvent:
+      type: object
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: integer
+        type:
+          type: string
+          enum: [thought, plan, code, test, error, success, git]
+        content:
+          type: string
+        iteration:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - sessionId
+        - type
+        - content
+        - iteration
+        - createdAt
+
+    TestResult:
+      type: object
+      properties:
+        id:
+          type: integer
+        sessionId:
+          type: integer
+        passed:
+          type: boolean
+        output:
+          type: string
+        errors:
+          type: ["string", "null"]
+        iteration:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - sessionId
+        - passed
+        - output
+        - iteration
+        - createdAt
+
+    AgentStats:
+      type: object
+      properties:
+        totalSessions:
+          type: integer
+        completedSessions:
+          type: integer
+        failedSessions:
+          type: integer
+        successRate:
+          type: number
+        avgIterations:
+          type: number
+        totalFilesGenerated:
+          type: integer
+      required:
+        - totalSessions
+        - completedSessions
+        - failedSessions
+        - successRate
+        - avgIterations
+        - totalFilesGenerated
+
+    GitStatus:
+      type: object
+      properties:
+        initialized:
+          type: boolean
+        branch:
+          type: string
+        modified:
+          type: array
+          items:
+            type: string
+        untracked:
+          type: array
+          items:
+            type: string
+        staged:
+          type: array
+          items:
+            type: string
+      required:
+        - initialized
+        - branch
+        - modified
+        - untracked
+        - staged
+
+    GitCommit:
+      type: object
+      properties:
+        hash:
+          type: string
+        message:
+          type: string
+        author:
+          type: string
+        date:
+          type: string
+      required:
+        - hash
+        - message
+        - author
+        - date
+
+    GitCommitBody:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - title
+        - createdAt
+        - updatedAt
+
+    CreateConversationBody:
+      type: object
+      properties:
+        title:
+          type: string
+      required:
+        - title
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+
+    SendOpenaiMessageBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content

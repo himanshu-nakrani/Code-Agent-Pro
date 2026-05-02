@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "AI Coding Agent"
+version = "1.0.0"
+id = "artifacts/ai-agent"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23886
+
+[services.development]
+run = "pnpm --filter @workspace/ai-agent run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ai-agent", "run", "build" ]
+publicDir = "artifacts/ai-agent/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23886"
+BASE_PATH = "/"
