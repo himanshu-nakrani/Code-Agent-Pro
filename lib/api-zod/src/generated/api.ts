@@ -120,6 +120,54 @@ export const DeleteSessionParams = zod.object({
 });
 
 /**
+ * @summary Re-run a completed or failed session
+ */
+export const RerunSessionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const RerunSessionResponse = zod.object({
+  id: zod.number(),
+  task: zod.string(),
+  language: zod.string(),
+  status: zod.enum([
+    "pending",
+    "planning",
+    "coding",
+    "testing",
+    "iterating",
+    "done",
+    "failed",
+    "cancelled",
+  ]),
+  iterations: zod.number(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
+ * @summary Update a file's content
+ */
+export const UpdateFileParams = zod.object({
+  id: zod.coerce.number(),
+  fileId: zod.coerce.number(),
+});
+
+export const UpdateFileBody = zod.object({
+  content: zod.string(),
+});
+
+export const UpdateFileResponse = zod.object({
+  id: zod.number(),
+  sessionId: zod.number(),
+  name: zod.string(),
+  content: zod.string(),
+  language: zod.string(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
  * @summary Cancel a running session
  */
 export const CancelSessionParams = zod.object({

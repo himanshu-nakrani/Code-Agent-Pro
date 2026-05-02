@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { eq, sql, avg } from "drizzle-orm";
 import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import archiver from "archiver";
 import { db, sessionsTable, agentFilesTable, agentEventsTable, testResultsTable } from "@workspace/db";
 import {
   CreateSessionBody,
@@ -16,8 +17,11 @@ import {
   GetGitLogParams,
   GitCommitParams,
   GitCommitBody,
+  UpdateFileBody,
+  UpdateFileParams,
+  RerunSessionParams,
 } from "@workspace/api-zod";
-import { runAgent, getWorkspacePath } from "../../lib/agent-engine";
+import { runAgent, resetAndRerunAgent, getWorkspacePath } from "../../lib/agent-engine";
 
 const router: IRouter = Router();
 
@@ -85,6 +89,103 @@ router.delete("/agent/sessions/:id", async (req, res): Promise<void> => {
   await db.delete(sessionsTable).where(eq(sessionsTable.id, params.data.id));
 
   res.sendStatus(204);
+});
+
+// Re-run session
+router.post("/agent/sessions/:id/rerun", async (req, res): Promise<void> => {
+  const params = RerunSessionParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, params.data.id));
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  const [updated] = await db.update(sessionsTable)
+    .set({ status: "pending", iterations: 0, updatedAt: new Date() })
+    .where(eq(sessionsTable.id, params.data.id))
+    .returning();
+
+  res.json(updated);
+
+  resetAndRerunAgent(session.id).catch((err) => {
+    req.log.error({ err, sessionId: session.id }, "Rerun agent failed");
+  });
+});
+
+// Update file content
+router.patch("/agent/sessions/:id/files/:fileId", async (req, res): Promise<void> => {
+  const params = UpdateFileParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const body = UpdateFileBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+
+  const [file] = await db.select().from(agentFilesTable).where(eq(agentFilesTable.id, params.data.fileId));
+  if (!file || file.sessionId !== params.data.id) {
+    res.status(404).json({ error: "File not found" });
+    return;
+  }
+
+  const [updated] = await db.update(agentFilesTable)
+    .set({ content: body.data.content, updatedAt: new Date() })
+    .where(eq(agentFilesTable.id, params.data.fileId))
+    .returning();
+
+  // Also write to disk
+  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, params.data.id));
+  if (session) {
+    const workspacePath = session.workspacePath || getWorkspacePath(params.data.id);
+    const filePath = join(workspacePath, file.name);
+    try { writeFileSync(filePath, body.data.content, "utf-8"); } catch { /* ignore */ }
+  }
+
+  res.json(updated);
+});
+
+// Download session files as zip
+router.get("/agent/sessions/:id/download", async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid session ID" });
+    return;
+  }
+
+  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, id));
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  const files = await db.select().from(agentFilesTable).where(eq(agentFilesTable.sessionId, id));
+  if (files.length === 0) {
+    res.status(404).json({ error: "No files to download" });
+    return;
+  }
+
+  const slug = session.task.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", `attachment; filename="forge_session_${id}_${slug}.zip"`);
+
+  const archive = archiver("zip", { zlib: { level: 6 } });
+  archive.pipe(res);
+
+  for (const file of files) {
+    archive.append(file.content, { name: file.name });
+  }
+
+  await archive.finalize();
 });
 
 // Cancel session

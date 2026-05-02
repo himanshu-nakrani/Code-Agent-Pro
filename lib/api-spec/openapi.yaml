@@ -99,6 +99,67 @@ paths:
         "204":
           description: Deleted
 
+  /agent/sessions/{id}/rerun:
+    post:
+      operationId: rerunSession
+      tags: [agent]
+      summary: Re-run a completed or failed session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Session reset and re-running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /agent/sessions/{id}/files/{fileId}:
+    patch:
+      operationId: updateFile
+      tags: [agent]
+      summary: Update a file's content
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFileBody"
+      responses:
+        "200":
+          description: Updated file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentFile"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /agent/sessions/{id}/cancel:
     post:
       operationId: cancelSession
@@ -588,6 +649,33 @@ components:
           type: string
       required:
         - message
+
+    UpdateFileBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    RerunSessionParams:
+      type: object
+      properties:
+        id:
+          type: integer
+      required:
+        - id
+
+    UpdateFileParams:
+      type: object
+      properties:
+        id:
+          type: integer
+        fileId:
+          type: integer
+      required:
+        - id
+        - fileId
 
     Conversation:
       type: object

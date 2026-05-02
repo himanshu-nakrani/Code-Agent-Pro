@@ -148,6 +148,19 @@ export interface GitCommitBody {
   message: string;
 }
 
+export interface UpdateFileBody {
+  content: string;
+}
+
+export interface RerunSessionParams {
+  id: number;
+}
+
+export interface UpdateFileParams {
+  id: number;
+  fileId: number;
+}
+
 export interface Conversation {
   id: string;
   title: string;

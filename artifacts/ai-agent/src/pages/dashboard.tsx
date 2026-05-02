@@ -1,15 +1,15 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "wouter";
-import { 
-  useListSessions, 
-  useGetAgentStats, 
-  useCreateSession, 
-  useDeleteSession 
+import {
+  useListSessions,
+  useGetAgentStats,
+  useCreateSession,
+  useDeleteSession,
 } from "@workspace/api-client-react";
 import { format } from "date-fns";
-import { Terminal, Activity, FileCode, Play, Trash2, Plus, Zap, Check, X, Clock } from "lucide-react";
+import { Terminal, Activity, FileCode, Play, Trash2, Plus, Zap, Check, X, Clock, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,36 +17,76 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const TASK_TEMPLATES: { label: string; task: string; language: "python" | "javascript" | "typescript" }[] = [
+  {
+    label: "FizzBuzz",
+    task: "Write a FizzBuzz program that prints numbers 1-100. For multiples of 3 print Fizz, multiples of 5 print Buzz, multiples of both print FizzBuzz.",
+    language: "python",
+  },
+  {
+    label: "REST API",
+    task: "Build a simple REST API with an in-memory store that supports CRUD operations for a todo list (create, read, update, delete todos).",
+    language: "javascript",
+  },
+  {
+    label: "CSV Parser",
+    task: "Write a Python script that reads a CSV file with columns: name, age, score. Parse it, compute the average score, find the top scorer, and print a summary report.",
+    language: "python",
+  },
+  {
+    label: "Binary Search",
+    task: "Implement a binary search algorithm with comprehensive tests. Include edge cases: empty array, single element, target not found, duplicate elements.",
+    language: "python",
+  },
+  {
+    label: "Markdown to HTML",
+    task: "Build a Markdown to HTML converter that handles headings, bold, italic, code blocks, and links. Include test cases.",
+    language: "typescript",
+  },
+  {
+    label: "Web Scraper",
+    task: "Write a Python script that fetches and parses HTML from a URL using requests and beautifulsoup4, extracts all links and headings, and prints a structured report.",
+    language: "python",
+  },
+];
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { data: sessions, isLoading: isLoadingSessions, refetch: refetchSessions } = useListSessions();
   const { data: stats, isLoading: isLoadingStats } = useGetAgentStats();
-  
+
   const createSession = useCreateSession();
   const deleteSession = useDeleteSession();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
-  const [newLang, setNewLang] = useState<"python"|"javascript"|"typescript">("python");
+  const [newLang, setNewLang] = useState<"python" | "javascript" | "typescript">("python");
 
   const handleCreate = () => {
     if (!newTask.trim()) return;
-    createSession.mutate({ data: { task: newTask, language: newLang } }, {
-      onSuccess: (res) => {
-        setIsDialogOpen(false);
-        setLocation(`/sessions/${res.id}`);
+    createSession.mutate(
+      { data: { task: newTask, language: newLang } },
+      {
+        onSuccess: (res) => {
+          setIsDialogOpen(false);
+          setNewTask("");
+          setLocation(`/sessions/${res.id}`);
+        },
       }
-    });
+    );
   };
 
   const handleDelete = (id: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (confirm("Are you sure you want to delete this session?")) {
-      deleteSession.mutate({ id }, {
-        onSuccess: () => refetchSessions()
-      });
+    if (confirm("Delete this session and all its files?")) {
+      deleteSession.mutate({ id }, { onSuccess: () => refetchSessions() });
     }
+  };
+
+  const applyTemplate = (t: typeof TASK_TEMPLATES[number]) => {
+    setNewTask(t.task);
+    setNewLang(t.language);
   };
 
   const getStatusColor = (status: string) => {
@@ -69,56 +109,102 @@ export default function Dashboard() {
     }
   };
 
+  const activeSessions = sessions?.filter(s =>
+    ["pending", "planning", "coding", "testing", "iterating"].includes(s.status)
+  ) || [];
+  const completedSessions = sessions?.filter(s =>
+    ["done", "failed", "cancelled"].includes(s.status)
+  ) || [];
+
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-card sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-primary-foreground">
               <Terminal className="w-5 h-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight font-mono">FORGE</h1>
+            {activeSessions.length > 0 && (
+              <Badge variant="outline" className="font-mono text-[10px] rounded-none border-blue-500/30 text-blue-400 bg-blue-500/10 ml-2">
+                <Activity className="w-2.5 h-2.5 mr-1 animate-pulse" />
+                {activeSessions.length} RUNNING
+              </Badge>
+            )}
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+          <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) setNewTask(""); }}>
             <DialogTrigger asChild>
               <Button variant="default" className="font-mono text-sm gap-2">
                 <Plus className="w-4 h-4" />
                 NEW SESSION
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-[500px] border-border bg-card">
+            <DialogContent className="sm:max-w-[560px] border-border bg-card">
               <DialogHeader>
-                <DialogTitle className="font-mono text-lg uppercase">Initialize New Agent</DialogTitle>
+                <DialogTitle className="font-mono text-base uppercase">Initialize New Agent</DialogTitle>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid gap-2">
-                  <Label htmlFor="task" className="font-mono text-xs text-muted-foreground uppercase">Task Directive</Label>
-                  <Input 
-                    id="task" 
+              <div className="flex flex-col gap-4 py-2">
+                {/* Templates */}
+                <div>
+                  <Label className="font-mono text-xs text-muted-foreground uppercase mb-2 block">
+                    Quick Templates
+                  </Label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TASK_TEMPLATES.map((t) => (
+                      <button
+                        key={t.label}
+                        onClick={() => applyTemplate(t)}
+                        className={`text-left px-2 py-1.5 border font-mono text-[10px] transition-colors hover:border-primary hover:text-primary hover:bg-primary/5 ${
+                          newTask === t.task
+                            ? "border-primary text-primary bg-primary/10"
+                            : "border-border text-muted-foreground"
+                        }`}
+                      >
+                        <div className="uppercase font-bold">{t.label}</div>
+                        <div className="text-[9px] opacity-60 mt-0.5">{t.language}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="h-[1px] bg-border" />
+
+                {/* Custom task */}
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="task" className="font-mono text-xs text-muted-foreground uppercase">
+                    Task Directive
+                  </Label>
+                  <textarea
+                    id="task"
                     value={newTask}
                     onChange={(e) => setNewTask(e.target.value)}
-                    placeholder="e.g. Build a script to parse access logs..."
-                    className="font-mono bg-background border-input"
-                    autoComplete="off"
+                    placeholder="Describe what you want the agent to build..."
+                    className="font-mono text-sm bg-background border border-input rounded-none p-3 resize-none focus:outline-none focus:border-primary transition-colors min-h-[80px]"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCreate();
+                    }}
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="language" className="font-mono text-xs text-muted-foreground uppercase">Runtime Environment</Label>
+
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="language" className="font-mono text-xs text-muted-foreground uppercase">
+                    Runtime
+                  </Label>
                   <Select value={newLang} onValueChange={(val: any) => setNewLang(val)}>
-                    <SelectTrigger className="font-mono bg-background border-input">
+                    <SelectTrigger className="font-mono bg-background border-input rounded-none">
                       <SelectValue placeholder="Select runtime" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="python">Python 3</SelectItem>
-                      <SelectItem value="javascript">Node.js</SelectItem>
+                      <SelectItem value="javascript">Node.js / JavaScript</SelectItem>
                       <SelectItem value="typescript">TypeScript</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <DialogFooter>
-                <Button 
-                  onClick={handleCreate} 
+                <Button
+                  onClick={handleCreate}
                   disabled={!newTask.trim() || createSession.isPending}
                   className="font-mono w-full gap-2"
                 >
@@ -132,98 +218,104 @@ export default function Dashboard() {
       </header>
 
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8 flex flex-col gap-8">
-        
+
         {/* Stats Row */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="bg-card border-border rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-mono text-muted-foreground uppercase flex items-center gap-2">
-                <Activity className="w-3 h-3" />
-                Total Sessions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingStats ? <Skeleton className="h-8 w-16 bg-muted" /> : (
-                <div className="text-3xl font-mono font-bold text-primary">{stats?.totalSessions || 0}</div>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-mono text-muted-foreground uppercase flex items-center gap-2">
-                <Check className="w-3 h-3" />
-                Success Rate
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingStats ? <Skeleton className="h-8 w-16 bg-muted" /> : (
-                <div className="text-3xl font-mono font-bold text-foreground">{(stats?.successRate || 0).toFixed(1)}%</div>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-mono text-muted-foreground uppercase flex items-center gap-2">
-                <Play className="w-3 h-3" />
-                Avg Iterations
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingStats ? <Skeleton className="h-8 w-16 bg-muted" /> : (
-                <div className="text-3xl font-mono font-bold text-foreground">{(stats?.avgIterations || 0).toFixed(1)}</div>
-              )}
-            </CardContent>
-          </Card>
-          <Card className="bg-card border-border rounded-none shadow-none">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-xs font-mono text-muted-foreground uppercase flex items-center gap-2">
-                <FileCode className="w-3 h-3" />
-                Files Generated
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {isLoadingStats ? <Skeleton className="h-8 w-16 bg-muted" /> : (
-                <div className="text-3xl font-mono font-bold text-foreground">{stats?.totalFilesGenerated || 0}</div>
-              )}
-            </CardContent>
-          </Card>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "Total Sessions", icon: Activity, value: stats?.totalSessions ?? 0, format: (v: number) => v },
+            { label: "Success Rate", icon: Check, value: stats?.successRate ?? 0, format: (v: number) => `${v.toFixed(1)}%` },
+            { label: "Avg Iterations", icon: Play, value: stats?.avgIterations ?? 0, format: (v: number) => v.toFixed(1) },
+            { label: "Files Generated", icon: FileCode, value: stats?.totalFilesGenerated ?? 0, format: (v: number) => v },
+          ].map(({ label, icon: Icon, value, format: fmt }) => (
+            <Card key={label} className="bg-card border-border rounded-none shadow-none">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-[10px] font-mono text-muted-foreground uppercase flex items-center gap-2">
+                  <Icon className="w-3 h-3" />
+                  {label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                {isLoadingStats ? (
+                  <Skeleton className="h-8 w-16 bg-muted" />
+                ) : (
+                  <div className="text-3xl font-mono font-bold text-primary">{fmt(value)}</div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
         </div>
 
-        {/* Sessions List */}
+        {/* Active Sessions */}
+        {activeSessions.length > 0 && (
+          <div>
+            <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground flex items-center gap-2">
+              <Activity className="w-3 h-3 animate-pulse text-blue-400" />
+              Running
+            </h2>
+            <div className="grid gap-2">
+              {activeSessions.map((session) => (
+                <Link key={session.id} href={`/sessions/${session.id}`}>
+                  <div className="group border border-blue-500/20 bg-blue-500/5 p-4 flex items-center justify-between gap-4 cursor-pointer hover:border-blue-500/40 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-1">
+                        <span className="font-mono text-xs text-muted-foreground">ID_{session.id.toString().padStart(4, "0")}</span>
+                        <Badge variant="outline" className={`font-mono text-[10px] rounded-none uppercase border ${getStatusColor(session.status)}`}>
+                          {getStatusIcon(session.status)}
+                          {session.status}
+                        </Badge>
+                        <span className="font-mono text-[10px] text-muted-foreground/60">{session.language}</span>
+                      </div>
+                      <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground/40 shrink-0" />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* All Sessions */}
         <div>
-          <h2 className="text-lg font-mono font-bold uppercase mb-4 text-muted-foreground">Active & Recent Directives</h2>
-          
-          <div className="grid gap-3">
-            {isLoadingSessions && (
+          <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground">
+            Active &amp; Recent Directives
+          </h2>
+
+          <div className="grid gap-2">
+            {isLoadingSessions &&
               Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-24 w-full bg-card rounded-none" />
-              ))
-            )}
-            
+                <Skeleton key={i} className="h-20 w-full bg-card rounded-none" />
+              ))}
+
             {!isLoadingSessions && sessions?.length === 0 && (
-              <div className="border border-dashed border-border p-12 text-center text-muted-foreground font-mono text-sm">
+              <div className="border border-dashed border-border p-12 text-center font-mono text-sm text-muted-foreground">
                 NO SESSIONS FOUND. INITIALIZE A NEW AGENT TO BEGIN.
               </div>
             )}
 
-            {sessions?.map(session => (
+            {sessions?.map((session) => (
               <Link key={session.id} href={`/sessions/${session.id}`}>
-                <div className="group relative border border-border bg-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:border-primary/50 transition-colors">
+                <div className="group relative border border-border bg-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:border-primary/40 transition-colors">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="font-mono text-xs text-muted-foreground">ID_{session.id.toString().padStart(4, '0')}</span>
-                      <Badge variant="outline" className={`font-mono text-[10px] rounded-none uppercase border ${getStatusColor(session.status)}`}>
+                    <div className="flex items-center gap-3 mb-1.5">
+                      <span className="font-mono text-xs text-muted-foreground shrink-0">
+                        ID_{session.id.toString().padStart(4, "0")}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={`font-mono text-[10px] rounded-none uppercase border shrink-0 ${getStatusColor(session.status)}`}
+                      >
                         {getStatusIcon(session.status)}
                         {session.status}
                       </Badge>
-                      <span className="font-mono text-xs text-muted-foreground">{session.language}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
+                        {session.language}
+                      </span>
                     </div>
-                    <p className="font-sans text-sm text-foreground truncate">
-                      {session.task}
-                    </p>
+                    <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
                   </div>
-                  
-                  <div className="flex items-center gap-6 shrink-0">
+
+                  <div className="flex items-center gap-5 shrink-0">
                     <div className="text-right hidden sm:block">
                       <div className="font-mono text-[10px] text-muted-foreground uppercase">Iterations</div>
                       <div className="font-mono text-sm">{session.iterations}</div>
@@ -232,9 +324,9 @@ export default function Dashboard() {
                       <div className="font-mono text-[10px] text-muted-foreground uppercase">Started</div>
                       <div className="font-mono text-sm">{format(new Date(session.createdAt), "MMM d, HH:mm")}</div>
                     </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
                       onClick={(e) => handleDelete(session.id, e)}
                     >
@@ -246,7 +338,6 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
-
       </main>
     </div>
   );

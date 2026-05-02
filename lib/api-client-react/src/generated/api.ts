@@ -33,6 +33,7 @@ import type {
   Session,
   SessionDetail,
   TestResult,
+  UpdateFileBody,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -450,6 +451,178 @@ export const useDeleteSession = <
   TContext
 > => {
   return useMutation(getDeleteSessionMutationOptions(options));
+};
+
+/**
+ * @summary Re-run a completed or failed session
+ */
+export const getRerunSessionUrl = (id: number) => {
+  return `/api/agent/sessions/${id}/rerun`;
+};
+
+export const rerunSession = async (
+  id: number,
+  options?: RequestInit,
+): Promise<Session> => {
+  return customFetch<Session>(getRerunSessionUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRerunSessionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rerunSession>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rerunSession>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  const mutationKey = ["rerunSession"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rerunSession>>,
+    { id: number }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return rerunSession(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RerunSessionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rerunSession>>
+>;
+
+export type RerunSessionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Re-run a completed or failed session
+ */
+export const useRerunSession = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rerunSession>>,
+    TError,
+    { id: number },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof rerunSession>>,
+  TError,
+  { id: number },
+  TContext
+> => {
+  return useMutation(getRerunSessionMutationOptions(options));
+};
+
+/**
+ * @summary Update a file's content
+ */
+export const getUpdateFileUrl = (id: number, fileId: number) => {
+  return `/api/agent/sessions/${id}/files/${fileId}`;
+};
+
+export const updateFile = async (
+  id: number,
+  fileId: number,
+  updateFileBody: UpdateFileBody,
+  options?: RequestInit,
+): Promise<AgentFile> => {
+  return customFetch<AgentFile>(getUpdateFileUrl(id, fileId), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateFileBody),
+  });
+};
+
+export const getUpdateFileMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFile>>,
+    TError,
+    { id: number; fileId: number; data: BodyType<UpdateFileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateFile>>,
+  TError,
+  { id: number; fileId: number; data: BodyType<UpdateFileBody> },
+  TContext
+> => {
+  const mutationKey = ["updateFile"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateFile>>,
+    { id: number; fileId: number; data: BodyType<UpdateFileBody> }
+  > = (props) => {
+    const { id, fileId, data } = props ?? {};
+
+    return updateFile(id, fileId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateFileMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateFile>>
+>;
+export type UpdateFileMutationBody = BodyType<UpdateFileBody>;
+export type UpdateFileMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update a file's content
+ */
+export const useUpdateFile = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateFile>>,
+    TError,
+    { id: number; fileId: number; data: BodyType<UpdateFileBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateFile>>,
+  TError,
+  { id: number; fileId: number; data: BodyType<UpdateFileBody> },
+  TContext
+> => {
+  return useMutation(getUpdateFileMutationOptions(options));
 };
 
 /**
