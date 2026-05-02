@@ -18,7 +18,7 @@ import { format } from "date-fns";
 import { useSSE } from "@/hooks/use-sse";
 import { 
   Terminal, ArrowLeft, Play, Square, FileCode, CheckCircle2, 
-  XCircle, GitBranch, Clock, AlertCircle, Loader2, RefreshCw
+  XCircle, GitBranch, Clock, AlertCircle, Loader2, RefreshCw, Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";

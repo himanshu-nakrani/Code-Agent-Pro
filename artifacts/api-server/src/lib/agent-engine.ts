@@ -35,7 +35,9 @@ async function saveFiles(sessionId: number, files: { name: string; content: stri
       await db.insert(agentFilesTable).values({ sessionId, ...file });
     }
     const workspacePath = getWorkspacePath(sessionId);
-    writeFileSync(join(workspacePath, file.name), file.content, "utf-8");
+    const filePath = join(workspacePath, file.name);
+    mkdirSync(filePath.substring(0, filePath.lastIndexOf("/")), { recursive: true });
+    writeFileSync(filePath, file.content, "utf-8");
   }
 }
 
