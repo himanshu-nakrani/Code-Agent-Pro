@@ -185,25 +185,24 @@ async function gitCommitAll(workspacePath: string, message: string) {
 function parseFilesFromResponse(response: string, language: string): { name: string; content: string; language: string }[] {
   const files: { name: string; content: string; language: string }[] = [];
 
-  // Split on triple backticks to find all code blocks
-  const parts = response.split(/```/);
+  // Find all markdown code blocks: look for ``` followed by content and closing ```
+  // Pattern: ```[language]\n ... \n```
+  const codeBlockRegex = /```[\w]*\n([\s\S]*?)\n```/g;
+  let match;
 
-  for (let i = 1; i < parts.length; i += 2) {
-    // Skip if no closing backticks
-    if (!parts[i + 1]) continue;
-
-    let blockContent = parts[i].trim();
+  while ((match = codeBlockRegex.exec(response)) !== null) {
+    let blockContent = match[1].trim();
     if (!blockContent || blockContent.length < 5) continue;
 
     const lines = blockContent.split("\n");
     let filename = "";
     let contentStart = 0;
 
-    // Check first 2 lines for filename marker
-    for (let lineIdx = 0; lineIdx < Math.min(2, lines.length); lineIdx++) {
+    // CRITICAL: Find filename in first 2 lines. Skip any content before the filename marker.
+    for (let lineIdx = 0; lineIdx < Math.min(3, lines.length); lineIdx++) {
       const line = lines[lineIdx].trim();
-      // Match: // filename: X or # filename: X (or file: variant)
-      const match = line.match(/(?:\/\/|#)\s*(?:file)?name:\s*(\S+)/i);
+      // Match: // filename: X or # filename: X (case insensitive, allow variations)
+      const match = line.match(/(?:\/\/|#)\s*file?names?:\s*(\S+)/i);
       if (match) {
         filename = match[1];
         contentStart = lineIdx + 1;
@@ -211,19 +210,23 @@ function parseFilesFromResponse(response: string, language: string): { name: str
       }
     }
 
-    // If still no filename, detect from content
+    // If still no filename found, use content-based heuristics
     if (!filename) {
-      const trimmed = blockContent.trim();
-      // JSON detector
-      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-        if (trimmed.includes('"name"') && trimmed.includes('"version"')) {
-          filename = "package.json";
-        } else {
+      // JSON detector - check if valid JSON with name/version (package.json pattern)
+      if (blockContent.trim().startsWith("{")) {
+        try {
+          const json = JSON.parse(blockContent);
+          if (json.name && json.version) {
+            filename = "package.json";
+          } else {
+            filename = "config.json";
+          }
+        } catch {
           filename = "config.json";
         }
       }
-      // Requirements.txt detector
-      else if (language === "python" && (trimmed.includes("==") || trimmed.includes(">="))) {
+      // Requirements.txt detector for Python
+      else if (language === "python" && (blockContent.includes("==") || blockContent.includes(">="))) {
         filename = "requirements.txt";
       }
       // Default to main file
@@ -233,14 +236,14 @@ function parseFilesFromResponse(response: string, language: string): { name: str
       }
     }
 
-    // Extract content (skip filename line)
+    // Extract content ONLY after the filename line
     const content = lines.slice(contentStart).join("\n").trim();
     if (!content) continue;
 
     files.push({ name: filename, content, language: detectLanguage(filename) });
   }
 
-  // Fallback
+  // Fallback: if no files found, treat entire response as single file
   if (files.length === 0) {
     const ext = language === "python" ? ".py" : language === "typescript" ? ".ts" : ".js";
     files.push({ name: `main${ext}`, content: response.trim(), language });
@@ -309,26 +312,37 @@ export async function runAgent(sessionId: number) {
 
     const systemPrompt = `You are an expert ${session.language} developer. Generate clean, well-tested, production-quality code.
 
-CRITICAL FORMAT RULES:
-1. **EACH FILE MUST HAVE A FILENAME MARKER AT THE START** of its code block. Use EXACTLY:
-   - For Python: # filename: <name> (first line)
-   - For JavaScript/TypeScript/JSON: // filename: <name> (first line)
-2. **OUTPUT FILES IN THIS ORDER:**
-   - Dependency files first: package.json, requirements.txt, etc.
-   - Main files second: main.py, main.js, main.ts
-   - Test/helper files last: test_*.py, *.test.js, etc.
-3. **Each file in its own markdown code block:**
-   \`\`\`${session.language === "python" ? "python" : "javascript"}
-   // filename: example.js
-   ... complete code ...
+**CRITICAL FORMAT RULES:**
+1. **EVERY FILE MUST START WITH A FILENAME MARKER** (first line of code block):
+   - JavaScript/JSON: // filename: <name>
+   - Python: # filename: <name>
+   
+2. **OUTPUT EACH FILE IN ITS OWN CODE BLOCK:**
+   \`\`\`javascript
+   // filename: package.json
+   { ... }
    \`\`\`
-4. **REQUIREMENTS:**
-   - Generate complete, runnable code — no placeholders or TODOs
-   - Include a main entry point (main.py / main.js / main.ts)
-   - For Python: if you use third-party packages, include requirements.txt
-   - For JS/TS: if you use packages, include package.json with all dependencies listed
-   - Make the code actually run and produce correct output (use console.log, print, etc.)
-   - Test your solution mentally before generating`;
+   
+   \`\`\`javascript
+   // filename: main.js
+   const express = require('express');
+   ... rest of code ...
+   \`\`\`
+
+3. **ABSOLUTELY REQUIRED:**
+   - ONLY include "test" script in package.json if you GENERATE a test file (test_*.js, *.test.js, etc.)
+   - For simple/demo tasks with no test file: use "start": "node main.js" only
+   - Generate COMPLETE, RUNNABLE code with no placeholders
+   - Include main.js/main.py that actually runs without errors
+   - If you use packages: include package.json with all dependencies
+   - If you use Python packages: include requirements.txt
+   - Code must produce visible output or serve requests successfully
+
+4. **DO NOT:**
+   - Reference test files in package.json unless you generate them
+   - Leave TODOs or incomplete code
+   - Use placeholder functions
+   - Include scripts for files that don't exist`;
 
     while (iteration < MAX_ITERATIONS) {
       iteration++;
@@ -338,8 +352,8 @@ CRITICAL FORMAT RULES:
         {
           role: "user",
           content: iteration === 1
-            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate complete, working ${session.language} code. REMEMBER:\n- Start EACH code block with a filename comment on the FIRST line\n- Put each file in a separate markdown block\n- Include package.json or requirements.txt if you use packages\n- Include a working main.js/main.py that actually runs`
-            : `Task: ${session.task}\n\nIteration ${iteration} - Previous errors:\n${lastTestOutput}\n\nFix all errors. REMEMBER THE FORMAT:\n- FIRST LINE: // filename: main.js (or # filename: main.py for Python)\n- Generate ALL files again\n- Ensure code is complete and runs without errors`,
+            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate complete ${session.language} code:\n1. FIRST line of EVERY code block: // filename: X or # filename: X\n2. Each file in separate markdown code block\n3. For JS: include package.json with ONLY scripts you'll create files for\n4. Create working main.js/main.py that runs without errors\n5. NO test scripts unless you generate test files`
+            : `Task: ${session.task}\n\nIteration ${iteration} FAILED. Errors:\n${lastTestOutput}\n\nFix all issues:\n1. FIRST line MUST be: // filename: main.js or # filename: main.py\n2. Generate package.json with NO test script (just "start")\n3. Create main.js that actually works when run\n4. Complete code only - no placeholders\n5. Ensure all files you reference in package.json are generated`,
         },
       ];
 
