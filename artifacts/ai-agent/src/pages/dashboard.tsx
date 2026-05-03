@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ThemeSwitcher } from "@/components/theme-switcher";
 
 const TASK_TEMPLATES: { label: string; task: string; language: "python" | "javascript" | "typescript" }[] = [
   {
@@ -132,13 +133,15 @@ export default function Dashboard() {
               </Badge>
             )}
           </div>
-          <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) setNewTask(""); }}>
-            <DialogTrigger asChild>
-              <Button variant="default" className="font-mono text-sm gap-2">
-                <Plus className="w-4 h-4" />
-                NEW SESSION
-              </Button>
-            </DialogTrigger>
+          <div className="flex items-center gap-2">
+            <ThemeSwitcher />
+            <Dialog open={isDialogOpen} onOpenChange={(o) => { setIsDialogOpen(o); if (!o) setNewTask(""); }}>
+              <DialogTrigger asChild>
+                <Button variant="default" className="font-mono text-sm gap-2">
+                  <Plus className="w-4 h-4" />
+                  NEW SESSION
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-[560px] border-border bg-card">
               <DialogHeader>
                 <DialogTitle className="font-mono text-base uppercase">Initialize New Agent</DialogTitle>
@@ -213,7 +216,8 @@ export default function Dashboard() {
                 </Button>
               </DialogFooter>
             </DialogContent>
-          </Dialog>
+            </Dialog>
+          </div>
         </div>
       </header>
 

@@ -1,0 +1,142 @@
+/* THEME: WARM & ACCESSIBLE */
+[data-theme="warm"] {
+  --button-outline: rgba(200, 100, 20, 0.08);
+  --badge-outline: rgba(200, 100, 20, 0.04);
+
+  --background: 25 30% 8%;
+  --foreground: 0 0% 98%;
+  --border: 25 25% 22%;
+  --card: 25 30% 12%;
+  --card-foreground: 0 0% 98%;
+  --card-border: 25 25% 22%;
+  --sidebar: 25 30% 12%;
+  --sidebar-foreground: 0 0% 98%;
+  --sidebar-border: 25 25% 22%;
+  --sidebar-primary: 32 85% 58%;
+  --sidebar-primary-foreground: 25 30% 12%;
+  --sidebar-accent: 25 35% 18%;
+  --sidebar-accent-foreground: 0 0% 98%;
+  --sidebar-ring: 32 85% 58%;
+  --popover: 25 30% 12%;
+  --popover-foreground: 0 0% 98%;
+  --popover-border: 25 25% 22%;
+  --primary: 32 85% 58%;
+  --primary-foreground: 25 30% 12%;
+  --secondary: 25 35% 18%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 25 20% 25%;
+  --muted-foreground: 0 0% 72%;
+  --accent: 25 35% 18%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 75% 55%;
+  --destructive-foreground: 0 0% 98%;
+  --input: 25 20% 25%;
+  --ring: 32 85% 58%;
+  --chart-1: 32 85% 58%;
+  --chart-2: 8 70% 54%;
+  --chart-3: 45 75% 60%;
+  --chart-4: 25 50% 50%;
+  --chart-5: 15 60% 55%;
+  
+  --radius: 0.5rem;
+}
+
+/* THEME: MINIMAL & PROFESSIONAL */
+[data-theme="minimal"] {
+  --button-outline: rgba(100, 100, 100, 0.08);
+  --badge-outline: rgba(100, 100, 100, 0.04);
+
+  --background: 220 13% 9%;
+  --foreground: 220 10% 92%;
+  --border: 220 10% 20%;
+  --card: 220 13% 13%;
+  --card-foreground: 220 10% 92%;
+  --card-border: 220 10% 20%;
+  --sidebar: 220 13% 13%;
+  --sidebar-foreground: 220 10% 92%;
+  --sidebar-border: 220 10% 20%;
+  --sidebar-primary: 220 8% 40%;
+  --sidebar-primary-foreground: 220 10% 92%;
+  --sidebar-accent: 220 8% 18%;
+  --sidebar-accent-foreground: 220 10% 92%;
+  --sidebar-ring: 220 8% 40%;
+  --popover: 220 13% 13%;
+  --popover-foreground: 220 10% 92%;
+  --popover-border: 220 10% 20%;
+  --primary: 220 8% 40%;
+  --primary-foreground: 220 10% 92%;
+  --secondary: 220 8% 18%;
+  --secondary-foreground: 220 10% 92%;
+  --muted: 220 10% 25%;
+  --muted-foreground: 220 5% 60%;
+  --accent: 220 8% 18%;
+  --accent-foreground: 220 10% 92%;
+  --destructive: 0 65% 50%;
+  --destructive-foreground: 0 0% 98%;
+  --input: 220 10% 25%;
+  --ring: 220 8% 40%;
+  --chart-1: 220 8% 40%;
+  --chart-2: 200 10% 50%;
+  --chart-3: 240 8% 35%;
+  --chart-4: 260 10% 45%;
+  --chart-5: 220 6% 55%;
+  
+  --radius: 0.375rem;
+  --app-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* THEME: PLAYFUL & ENERGETIC */
+[data-theme="playful"] {
+  --button-outline: rgba(99, 102, 241, 0.12);
+  --badge-outline: rgba(99, 102, 241, 0.06);
+
+  --background: 280 30% 10%;
+  --foreground: 0 0% 99%;
+  --border: 280 20% 25%;
+  --card: 280 30% 14%;
+  --card-foreground: 0 0% 99%;
+  --card-border: 280 20% 25%;
+  --sidebar: 280 30% 14%;
+  --sidebar-foreground: 0 0% 99%;
+  --sidebar-border: 280 20% 25%;
+  --sidebar-primary: 262 80% 50%;
+  --sidebar-primary-foreground: 280 30% 10%;
+  --sidebar-accent: 280 30% 22%;
+  --sidebar-accent-foreground: 0 0% 99%;
+  --sidebar-ring: 262 80% 50%;
+  --popover: 280 30% 14%;
+  --popover-foreground: 0 0% 99%;
+  --popover-border: 280 20% 25%;
+  --primary: 262 80% 50%;
+  --primary-foreground: 280 30% 10%;
+  --secondary: 280 30% 22%;
+  --secondary-foreground: 0 0% 99%;
+  --muted: 280 20% 30%;
+  --muted-foreground: 0 0% 75%;
+  --accent: 280 30% 22%;
+  --accent-foreground: 0 0% 99%;
+  --destructive: 0 84% 65%;
+  --destructive-foreground: 0 0% 99%;
+  --input: 280 20% 30%;
+  --ring: 262 80% 50%;
+  --chart-1: 262 80% 50%;
+  --chart-2: 8 80% 55%;
+  --chart-3: 48 90% 56%;
+  --chart-4: 162 73% 46%;
+  --chart-5: 342 89% 60%;
+  
+  --radius: 0.75rem;
+}
+
+/* Theme-specific adjustments */
+[data-theme="warm"] ::-webkit-scrollbar-thumb {
+  background: hsl(32 85% 48%);
+}
+
+[data-theme="minimal"] ::-webkit-scrollbar-thumb {
+  background: hsl(220 8% 35%);
+}
+
+[data-theme="playful"] ::-webkit-scrollbar-thumb {
+  background: hsl(262 80% 45%);
+}

@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/dashboard";
 import SessionDetail from "@/pages/session-detail";
+import "@/themes.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
