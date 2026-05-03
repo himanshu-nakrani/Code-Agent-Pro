@@ -108,11 +108,110 @@ async function installDependencies(workspacePath: string, language: string, sess
   }
 }
 
-async function runTests(workspacePath: string, language: string): Promise<{ passed: boolean; output: string; errors: string | null }> {
+function detectErrorType(output: string): string {
+  const lower = output.toLowerCase();
+  
+  if (lower.includes("syntaxerror") || lower.includes("unexpected token")) return "SYNTAX_ERROR";
+  if (lower.includes("cannot find module") || lower.includes("module not found")) return "MISSING_MODULE";
+  if (lower.includes("enoent") || lower.includes("no such file")) return "MISSING_FILE";
+  if (lower.includes("typeerror") || lower.includes("is not a function")) return "TYPE_ERROR";
+  if (lower.includes("referenceerror") || lower.includes("is not defined")) return "REFERENCE_ERROR";
+  if (lower.includes("failed to parse") || lower.includes("json")) return "JSON_ERROR";
+  if (lower.includes("eaddrinuse")) return "PORT_IN_USE";
+  if (lower.includes("permission denied") || lower.includes("eperm")) return "PERMISSION_ERROR";
+  if (lower.includes("test") && lower.includes("fail")) return "TEST_FAILED";
+  if (lower.includes("timeout")) return "TIMEOUT";
+  if (lower.includes("importerror") || lower.includes("modulenotfounderror")) return "IMPORT_ERROR";
+  if (lower.includes("assertion") || lower.includes("assert")) return "ASSERTION_ERROR";
+  
+  return "UNKNOWN_ERROR";
+}
+
+async function validateGeneratedFiles(workspacePath: string, files: { name: string; content: string; language: string }[], language: string): Promise<{ valid: boolean; issues: string[] }> {
+  const issues: string[] = [];
+
+  // Check if main file exists
+  const mainExt = language === "python" ? ".py" : ".js";
+  const mainExists = files.some(f => f.name === `main${mainExt}`);
+  if (!mainExists) {
+    issues.push(`Missing main${mainExt} entry point`);
+  }
+
+  // Check package.json consistency for JavaScript
+  const pkgFile = files.find(f => f.name === "package.json");
+  if (pkgFile && (language === "javascript" || language === "typescript")) {
+    try {
+      const pkg = JSON.parse(pkgFile.content);
+      
+      // Validate main field
+      if (pkg.main && !files.some(f => f.name === pkg.main)) {
+        issues.push(`package.json references main: "${pkg.main}" but file not generated`);
+      }
+
+      // Validate scripts
+      if (pkg.scripts) {
+        for (const [scriptName, scriptCmd] of Object.entries(pkg.scripts)) {
+          const cmd = scriptCmd as string;
+          // Check if test script references non-existent test file
+          if (scriptName === "test" && cmd.includes("test")) {
+            const testFileMatch = cmd.match(/(\w+\.test\.js|test_\w+\.js|\w+_test\.js)/);
+            if (testFileMatch) {
+              const testFile = testFileMatch[1];
+              if (!files.some(f => f.name === testFile)) {
+                issues.push(`package.json has test script but test file "${testFile}" not generated`);
+              }
+            }
+          }
+        }
+      }
+
+      // Validate dependencies are present
+      if (pkg.dependencies) {
+        // Check if express is used but not imported properly
+        if (pkg.dependencies.express && mainExists) {
+          const mainFile = files.find(f => f.name === `main${mainExt}`);
+          if (mainFile && !mainFile.content.includes("require('express')") && !mainFile.content.includes('require("express")')) {
+            issues.push("package.json lists express as dependency but main file doesn't import it");
+          }
+        }
+      }
+    } catch (e) {
+      issues.push(`Invalid package.json: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // Check for common syntax issues
+  for (const file of files) {
+    // JSON validation
+    if (file.name.endsWith(".json")) {
+      try {
+        JSON.parse(file.content);
+      } catch (e) {
+        issues.push(`Invalid JSON in ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // Check for incomplete code (trailing ...)
+    if (file.content.includes("...") && !file.name.endsWith(".md")) {
+      issues.push(`${file.name} appears incomplete (contains ...)`);
+    }
+
+    // Check for TODO/FIXME
+    if ((file.content.includes("TODO") || file.content.includes("FIXME")) && !file.name.endsWith(".md")) {
+      issues.push(`${file.name} contains unfinished TODO/FIXME comments`);
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues
+  };
+}
+
+async function runTests(workspacePath: string, language: string): Promise<{ passed: boolean; output: string; errors: string | null; errorType?: string }> {
   let cmd = "";
 
   if (language === "python") {
-    // Check for pytest test files
     const hasTestFiles = (() => {
       try {
         const out = execSync(`find "${workspacePath}" -name "test_*.py" -o -name "*_test.py" 2>/dev/null`, { encoding: "utf-8" }).trim();
@@ -156,11 +255,13 @@ async function runTests(workspacePath: string, language: string): Promise<{ pass
     const output = (stdout + stderr).trim();
     const lower = output.toLowerCase();
     const passed = !lower.includes("error") && !lower.includes("failed") && !lower.includes("exception") && !lower.includes("traceback");
-    return { passed, output: output.slice(0, 5000), errors: passed ? null : output.slice(0, 2000) };
+    const errorType = passed ? undefined : detectErrorType(output);
+    return { passed, output: output.slice(0, 5000), errors: passed ? null : output.slice(0, 2000), errorType };
   } catch (err: unknown) {
     const error = err as { stdout?: string; stderr?: string; message?: string };
     const output = ((error.stdout || "") + (error.stderr || error.message || "")).trim();
-    return { passed: false, output: output.slice(0, 5000), errors: output.slice(0, 2000) };
+    const errorType = detectErrorType(output);
+    return { passed: false, output: output.slice(0, 5000), errors: output.slice(0, 2000), errorType };
   }
 }
 
@@ -367,6 +468,16 @@ export async function runAgent(sessionId: number) {
       await addEvent(sessionId, "code", `Generated code (iteration ${iteration}):\n\n${codeContent.slice(0, 1200)}${codeContent.length > 1200 ? "..." : ""}`, iteration);
 
       const files = parseFilesFromResponse(codeContent, session.language);
+      
+      // Validate generated files before saving
+      const validation = await validateGeneratedFiles(workspacePath, files, session.language);
+      if (!validation.valid) {
+        const issueList = validation.issues.join("\n- ");
+        await addEvent(sessionId, "error", `Pre-flight validation failed:\n- ${issueList}\n\nRegenerating with fixes...`, iteration);
+        lastTestOutput = `Validation errors: ${issueList}`;
+        continue; // Skip to next iteration without running tests
+      }
+
       await saveFiles(sessionId, files);
 
       await gitCommitAll(workspacePath, `feat: generated code iteration ${iteration}`);
@@ -396,10 +507,29 @@ export async function runAgent(sessionId: number) {
         return;
       } else {
         lastTestOutput = testResult.errors || testResult.output;
-        await addEvent(sessionId, "error", `Tests failed on iteration ${iteration}:\n${testResult.errors?.slice(0, 800) || testResult.output.slice(0, 800)}`, iteration);
+        const errorTypeMsg = testResult.errorType ? ` [${testResult.errorType}]` : "";
+        await addEvent(sessionId, "error", `Tests failed on iteration ${iteration}${errorTypeMsg}:\n${testResult.errors?.slice(0, 800) || testResult.output.slice(0, 800)}`, iteration);
 
         if (iteration < MAX_ITERATIONS) {
-          await addEvent(sessionId, "thought", `Analyzing errors and preparing fix for iteration ${iteration + 1}...`, iteration);
+          // Provide targeted guidance based on error type
+          let guidance = "";
+          if (testResult.errorType === "SYNTAX_ERROR") {
+            guidance = "→ Fix syntax errors in the code";
+          } else if (testResult.errorType === "MISSING_MODULE" || testResult.errorType === "MISSING_FILE") {
+            guidance = "→ Ensure all required files are generated. Check if package.json references missing files.";
+          } else if (testResult.errorType === "JSON_ERROR") {
+            guidance = "→ Fix invalid JSON syntax in package.json or other JSON files";
+          } else if (testResult.errorType === "IMPORT_ERROR") {
+            guidance = "→ Fix import statements and module references";
+          } else if (testResult.errorType === "TYPE_ERROR" || testResult.errorType === "REFERENCE_ERROR") {
+            guidance = "→ Fix undefined variables and function calls";
+          } else if (testResult.errorType === "TIMEOUT") {
+            guidance = "→ Code is taking too long. Remove infinite loops or add timeouts.";
+          } else {
+            guidance = "→ Debug and fix the errors above";
+          }
+
+          await addEvent(sessionId, "thought", `Analyzing errors and preparing fix for iteration ${iteration + 1}...\n${guidance}`, iteration);
         }
       }
     }
