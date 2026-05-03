@@ -185,41 +185,62 @@ async function gitCommitAll(workspacePath: string, message: string) {
 function parseFilesFromResponse(response: string, language: string): { name: string; content: string; language: string }[] {
   const files: { name: string; content: string; language: string }[] = [];
 
-  // Look for markdown code blocks with filenames
-  const fileBlockRegex = /(?:###?\s+(?:File:\s*)?`?([^`\n]+)`?\s*\n)?[`]{3}(\w+)?\s*(?:\/\/\s*([^\n]+))?\n([\s\S]*?)[`]{3}/g;
-  const filenameCommentRegex = /^(?:#|\/\/)\s*(?:filename:|file:)?\s*(\S+\.\w+)/im;
+  // Split on triple backticks to find all code blocks
+  const parts = response.split(/```/);
 
-  let match;
-  let fileIndex = 0;
+  for (let i = 1; i < parts.length; i += 2) {
+    // Skip if no closing backticks
+    if (!parts[i + 1]) continue;
 
-  while ((match = fileBlockRegex.exec(response)) !== null) {
-    const headerFilename = match[1]?.trim();
-    const lang = match[2] || language;
-    const inlineComment = match[3];
-    const content = match[4].trim();
+    let blockContent = parts[i].trim();
+    if (!blockContent || blockContent.length < 5) continue;
 
-    if (!content || content.length < 5) continue;
+    const lines = blockContent.split("\n");
+    let filename = "";
+    let contentStart = 0;
 
-    let filename = headerFilename || inlineComment;
-    if (!filename) {
-      const commentMatch = content.match(filenameCommentRegex);
-      if (commentMatch) {
-        filename = commentMatch[1];
+    // Check first 2 lines for filename marker
+    for (let lineIdx = 0; lineIdx < Math.min(2, lines.length); lineIdx++) {
+      const line = lines[lineIdx].trim();
+      // Match: // filename: X or # filename: X (or file: variant)
+      const match = line.match(/(?:\/\/|#)\s*(?:file)?name:\s*(\S+)/i);
+      if (match) {
+        filename = match[1];
+        contentStart = lineIdx + 1;
+        break;
       }
     }
 
+    // If still no filename, detect from content
     if (!filename) {
-      const ext = language === "python" ? ".py" : language === "typescript" ? ".ts" : ".js";
-      filename = fileIndex === 0 ? `main${ext}` : `module${fileIndex}${ext}`;
-      if (lang === "text" || lang === "txt") filename = "requirements.txt";
-      if (lang === "json") filename = `config${fileIndex}.json`;
-      if (lang === "sh" || lang === "bash") filename = `run${fileIndex}.sh`;
+      const trimmed = blockContent.trim();
+      // JSON detector
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        if (trimmed.includes('"name"') && trimmed.includes('"version"')) {
+          filename = "package.json";
+        } else {
+          filename = "config.json";
+        }
+      }
+      // Requirements.txt detector
+      else if (language === "python" && (trimmed.includes("==") || trimmed.includes(">="))) {
+        filename = "requirements.txt";
+      }
+      // Default to main file
+      else {
+        const ext = language === "python" ? ".py" : language === "typescript" ? ".ts" : ".js";
+        filename = `main${ext}`;
+      }
     }
 
+    // Extract content (skip filename line)
+    const content = lines.slice(contentStart).join("\n").trim();
+    if (!content) continue;
+
     files.push({ name: filename, content, language: detectLanguage(filename) });
-    fileIndex++;
   }
 
+  // Fallback
   if (files.length === 0) {
     const ext = language === "python" ? ".py" : language === "typescript" ? ".ts" : ".js";
     files.push({ name: `main${ext}`, content: response.trim(), language });
@@ -288,15 +309,26 @@ export async function runAgent(sessionId: number) {
 
     const systemPrompt = `You are an expert ${session.language} developer. Generate clean, well-tested, production-quality code.
 
-Rules:
-- Each file must start with a comment: # filename: <name> (for Python) or // filename: <name> (for JS/TS)
-- Wrap each file in a markdown code block: \`\`\`python\\n# filename: main.py\\n...code...\`\`\`
-- Generate complete, runnable code — no placeholders or TODOs
-- Include a main entry point (main.py / main.js / main.ts)
-- For Python: if you use third-party packages, include a requirements.txt file
-- For JS/TS: if you use packages, include a package.json with dependencies
-- If the task doesn't mention tests specifically, make the code produce visible output (print/console.log results)
-- Make the code actually run and produce correct output`;
+CRITICAL FORMAT RULES:
+1. **EACH FILE MUST HAVE A FILENAME MARKER AT THE START** of its code block. Use EXACTLY:
+   - For Python: # filename: <name> (first line)
+   - For JavaScript/TypeScript/JSON: // filename: <name> (first line)
+2. **OUTPUT FILES IN THIS ORDER:**
+   - Dependency files first: package.json, requirements.txt, etc.
+   - Main files second: main.py, main.js, main.ts
+   - Test/helper files last: test_*.py, *.test.js, etc.
+3. **Each file in its own markdown code block:**
+   \`\`\`${session.language === "python" ? "python" : "javascript"}
+   // filename: example.js
+   ... complete code ...
+   \`\`\`
+4. **REQUIREMENTS:**
+   - Generate complete, runnable code — no placeholders or TODOs
+   - Include a main entry point (main.py / main.js / main.ts)
+   - For Python: if you use third-party packages, include requirements.txt
+   - For JS/TS: if you use packages, include package.json with all dependencies listed
+   - Make the code actually run and produce correct output (use console.log, print, etc.)
+   - Test your solution mentally before generating`;
 
     while (iteration < MAX_ITERATIONS) {
       iteration++;
@@ -306,8 +338,8 @@ Rules:
         {
           role: "user",
           content: iteration === 1
-            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate all the ${session.language} files needed. Each file block must start with a filename comment.`
-            : `Task: ${session.task}\n\nPrevious code had issues:\n${lastTestOutput}\n\nFix the errors and regenerate all files. Ensure the code runs without errors.`,
+            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate complete, working ${session.language} code. REMEMBER:\n- Start EACH code block with a filename comment on the FIRST line\n- Put each file in a separate markdown block\n- Include package.json or requirements.txt if you use packages\n- Include a working main.js/main.py that actually runs`
+            : `Task: ${session.task}\n\nIteration ${iteration} - Previous errors:\n${lastTestOutput}\n\nFix all errors. REMEMBER THE FORMAT:\n- FIRST LINE: // filename: main.js (or # filename: main.py for Python)\n- Generate ALL files again\n- Ensure code is complete and runs without errors`,
         },
       ];
 
