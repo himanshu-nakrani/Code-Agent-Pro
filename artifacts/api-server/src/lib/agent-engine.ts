@@ -54,77 +54,221 @@ function detectLanguage(filename: string): string {
 }
 
 async function installDependencies(workspacePath: string, language: string, sessionId: number): Promise<void> {
+  const MAX_RETRIES = 2;
+  
+  async function installWithRetry(cmd: string, label: string, retries = MAX_RETRIES): Promise<boolean> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await addEvent(sessionId, "thought", `${label}${attempt > 1 ? ` (attempt ${attempt}/${retries})` : ""}...`, 0);
+        const { stdout, stderr } = await execAsync(cmd, { timeout: 120000 });
+        const out = (stdout + stderr).trim();
+        
+        // Check for actual errors vs warnings
+        const lower = out.toLowerCase();
+        if (lower.includes("error") && !lower.includes("warning")) {
+          throw new Error(out.slice(0, 300));
+        }
+        
+        if (out) await addEvent(sessionId, "thought", `${label} success:\n${out.slice(0, 300)}`, 0);
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt === retries) {
+          logger.warn({ err, sessionId, cmd }, `${label} failed after ${retries} attempts`);
+          await addEvent(sessionId, "thought", `${label} warning (continuing anyway): ${msg.slice(0, 150)}`, 0);
+          return false;
+        }
+        await addEvent(sessionId, "thought", `${label} attempt ${attempt} failed, retrying... ${msg.slice(0, 100)}`, 0);
+      }
+    }
+    return false;
+  }
+
   try {
     if (language === "python") {
       const reqFile = join(workspacePath, "requirements.txt");
       if (existsSync(reqFile)) {
-        await addEvent(sessionId, "thought", "Installing Python dependencies from requirements.txt...", 0);
-        const { stdout, stderr } = await execAsync(
+        await installWithRetry(
           `pip3 install -r "${reqFile}" --quiet --no-warn-script-location 2>&1`,
-          { timeout: 60000 }
+          "Installing Python dependencies from requirements.txt"
         );
-        const out = (stdout + stderr).trim();
-        if (out) await addEvent(sessionId, "thought", `Dependency install output:\n${out.slice(0, 500)}`, 0);
       } else {
         // Detect imports from python files and install common packages
-        const pyFiles = execSync(`find "${workspacePath}" -name "*.py" 2>/dev/null`, { encoding: "utf-8" })
-          .split("\n").filter(Boolean);
-        const imports = new Set<string>();
-        for (const f of pyFiles) {
-          try {
-            const content = readFileSync(f, "utf-8");
-            const matches = content.matchAll(/^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm);
-            for (const m of matches) {
-              const pkg = m[1];
-              // Only attempt to install known third-party packages
-              const thirdParty = ["numpy", "pandas", "requests", "flask", "fastapi", "scipy", "matplotlib",
-                "sklearn", "tensorflow", "torch", "pytest", "httpx", "pydantic", "sqlalchemy",
-                "aiohttp", "click", "rich", "typer", "pillow", "cv2", "bs4", "lxml"];
-              if (thirdParty.includes(pkg)) imports.add(pkg === "cv2" ? "opencv-python" : pkg === "bs4" ? "beautifulsoup4" : pkg);
-            }
-          } catch { /* skip */ }
-        }
-        if (imports.size > 0) {
-          const pkgList = [...imports].join(" ");
-          await addEvent(sessionId, "thought", `Installing detected Python packages: ${pkgList}`, 0);
-          await execAsync(`pip3 install ${pkgList} --quiet --no-warn-script-location 2>&1`, { timeout: 60000 });
+        try {
+          const pyFiles = execSync(`find "${workspacePath}" -name "*.py" 2>/dev/null`, { encoding: "utf-8" })
+            .split("\n").filter(Boolean);
+          const imports = new Set<string>();
+          
+          for (const f of pyFiles) {
+            try {
+              const content = readFileSync(f, "utf-8");
+              const matches = content.matchAll(/^(?:import|from)\s+([a-zA-Z_][a-zA-Z0-9_]*)/gm);
+              for (const m of matches) {
+                const pkg = m[1];
+                const thirdParty = ["numpy", "pandas", "requests", "flask", "fastapi", "scipy", "matplotlib",
+                  "sklearn", "tensorflow", "torch", "pytest", "httpx", "pydantic", "sqlalchemy",
+                  "aiohttp", "click", "rich", "typer", "pillow", "cv2", "bs4", "lxml", "django"];
+                if (thirdParty.includes(pkg)) {
+                  imports.add(pkg === "cv2" ? "opencv-python" : pkg === "bs4" ? "beautifulsoup4" : pkg);
+                }
+              }
+            } catch { /* skip */ }
+          }
+          
+          if (imports.size > 0) {
+            const pkgList = [...imports].join(" ");
+            await installWithRetry(
+              `pip3 install ${pkgList} --quiet --no-warn-script-location 2>&1`,
+              `Installing detected Python packages: ${pkgList}`
+            );
+          }
+        } catch (err) {
+          logger.warn({ err, sessionId }, "Failed to detect Python imports");
         }
       }
     } else if (language === "javascript" || language === "typescript") {
       const pkgFile = join(workspacePath, "package.json");
       if (existsSync(pkgFile)) {
-        await addEvent(sessionId, "thought", "Installing Node.js dependencies from package.json...", 0);
-        const { stdout, stderr } = await execAsync(
-          `cd "${workspacePath}" && npm install --silent 2>&1`,
-          { timeout: 90000 }
+        await installWithRetry(
+          `cd "${workspacePath}" && npm install --silent --prefer-offline 2>&1`,
+          "Installing Node.js dependencies from package.json"
         );
-        const out = (stdout + stderr).trim();
-        if (out) await addEvent(sessionId, "thought", `npm install output:\n${out.slice(0, 500)}`, 0);
       }
     }
   } catch (err) {
-    logger.warn({ err, sessionId }, "Dependency installation warning (non-fatal)");
-    await addEvent(sessionId, "thought", `Dependency install warning: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}`, 0);
+    logger.warn({ err, sessionId }, "Dependency installation error (non-fatal, continuing)");
   }
 }
 
 function detectErrorType(output: string): string {
   const lower = output.toLowerCase();
   
+  // Critical errors (fail fast)
+  if (lower.includes("circular require") || lower.includes("circular dependency")) return "CIRCULAR_DEPENDENCY";
+  if (lower.includes("maximum call stack") || lower.includes("stack overflow")) return "STACK_OVERFLOW";
+  if (lower.includes("out of memory") || lower.includes("heapspace")) return "OUT_OF_MEMORY";
+  
+  // File/Path errors
+  if (lower.includes("enoent") || lower.includes("no such file") || lower.includes("cannot find")) return "MISSING_FILE";
+  if (lower.includes("cannot find module") || lower.includes("module not found") || lower.includes("err_module_not_found")) return "MISSING_MODULE";
+  
+  // Syntax/Parse errors
   if (lower.includes("syntaxerror") || lower.includes("unexpected token")) return "SYNTAX_ERROR";
-  if (lower.includes("cannot find module") || lower.includes("module not found")) return "MISSING_MODULE";
-  if (lower.includes("enoent") || lower.includes("no such file")) return "MISSING_FILE";
+  if (lower.includes("failed to parse") || lower.includes("unexpected end of json") || lower.includes("json.parse")) return "JSON_ERROR";
+  
+  // Runtime errors
   if (lower.includes("typeerror") || lower.includes("is not a function")) return "TYPE_ERROR";
   if (lower.includes("referenceerror") || lower.includes("is not defined")) return "REFERENCE_ERROR";
-  if (lower.includes("failed to parse") || lower.includes("json")) return "JSON_ERROR";
-  if (lower.includes("eaddrinuse")) return "PORT_IN_USE";
-  if (lower.includes("permission denied") || lower.includes("eperm")) return "PERMISSION_ERROR";
-  if (lower.includes("test") && lower.includes("fail")) return "TEST_FAILED";
-  if (lower.includes("timeout")) return "TIMEOUT";
   if (lower.includes("importerror") || lower.includes("modulenotfounderror")) return "IMPORT_ERROR";
-  if (lower.includes("assertion") || lower.includes("assert")) return "ASSERTION_ERROR";
+  
+  // Network/Port errors
+  if (lower.includes("eaddrinuse") || lower.includes("address already in use")) return "PORT_IN_USE";
+  if (lower.includes("econnrefused") || lower.includes("connection refused")) return "CONNECTION_REFUSED";
+  if (lower.includes("econnreset") || lower.includes("connection reset")) return "CONNECTION_RESET";
+  
+  // Permission/Access errors
+  if (lower.includes("permission denied") || lower.includes("eperm") || lower.includes("eacces")) return "PERMISSION_ERROR";
+  
+  // Async/Promise errors
+  if (lower.includes("await") && (lower.includes("syntaxerror") || lower.includes("unexpected identifier"))) return "ASYNC_AWAIT_ERROR";
+  if (lower.includes("promise") || lower.includes(".then is not a function")) return "PROMISE_ERROR";
+  
+  // Test/Assertion errors
+  if ((lower.includes("test") || lower.includes("assert")) && lower.includes("fail")) return "TEST_FAILED";
+  if (lower.includes("assertion") || lower.includes("assert.throws")) return "ASSERTION_ERROR";
+  
+  // Performance/Timeout errors
+  if (lower.includes("timeout") || lower.includes("exceeded") || lower.includes("timeout exceeded")) return "TIMEOUT";
+  
+  // Python-specific errors
+  if (lower.includes("indentationerror")) return "INDENTATION_ERROR";
+  if (lower.includes("keyerror") || lower.includes("valueerror")) return "VALUE_ERROR";
+  if (lower.includes("attributeerror")) return "ATTRIBUTE_ERROR";
+  if (lower.includes("nameerror") || lower.includes("not defined")) return "REFERENCE_ERROR";
+  
+  // npm/pip specific errors
+  if (lower.includes("peer dep missing") || lower.includes("unmet peer")) return "MISSING_PEER_DEPENDENCY";
+  if (lower.includes("conflicting") || lower.includes("conflict")) return "DEPENDENCY_CONFLICT";
+  if (lower.includes("deprecated")) return "DEPRECATED_DEPENDENCY";
   
   return "UNKNOWN_ERROR";
+}
+
+function extractErrorContext(output: string): string {
+  const lines = output.split("\n");
+  const errorLines: string[] = [];
+  
+  // Priority 1: Find actual error message line (not just "at" stack)
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lower = line.toLowerCase();
+    
+    // Match error message patterns
+    if (lower.match(/^(error|warning|typeerror|syntaxerror|referenceerror|importerror|moduleerror|enoent|eaddrinuse|failed)/) ||
+        lower.includes(": error:") ||
+        lower.match(/at .+:\d+:\d+/) && errorLines.length === 0) {
+      errorLines.push(line);
+      
+      // Include context line before if available
+      if (i > 0 && !errorLines.includes(lines[i - 1])) {
+        errorLines.unshift(lines[i - 1]);
+      }
+      
+      // Include next line for additional context
+      if (i + 1 < lines.length) {
+        errorLines.push(lines[i + 1]);
+      }
+      
+      if (errorLines.length >= 4) break;
+    }
+  }
+  
+  // Priority 2: If no error pattern found, take first non-empty line
+  if (errorLines.length === 0) {
+    for (const line of lines) {
+      if (line.trim()) {
+        errorLines.push(line);
+        if (errorLines.length >= 2) break;
+      }
+    }
+  }
+  
+  return errorLines.length > 0 ? errorLines.join("\n").slice(0, 400) : output.slice(0, 200);
+}
+
+function generateFixPrompt(errorType: string, errorOutput: string): string {
+  const context = extractErrorContext(errorOutput);
+  
+  const prompts: Record<string, string> = {
+    "SYNTAX_ERROR": `Syntax error detected. Fix invalid JavaScript/Python syntax (check parentheses, quotes, colons, indentation):\n${context}`,
+    "MISSING_MODULE": `Module not found. Add to package.json dependencies or import with correct path:\n${context}`,
+    "MISSING_FILE": `File not found. Generate all referenced files in code blocks:\n${context}`,
+    "JSON_ERROR": `Invalid JSON format. Fix quotes, commas, braces in package.json or config files:\n${context}`,
+    "TYPE_ERROR": `Type error or function missing. Verify all functions are defined before calling:\n${context}`,
+    "REFERENCE_ERROR": `Variable or function undefined. Check imports and variable declarations:\n${context}`,
+    "IMPORT_ERROR": `Import/require broken. Fix module paths and ensure dependencies are listed:\n${context}`,
+    "TIMEOUT": `Code is too slow or infinite loop. Optimize or remove loops:\n${context}`,
+    "ASYNC_AWAIT_ERROR": `Async/await syntax error. Mark function as 'async' before using 'await':\n${context}`,
+    "PROMISE_ERROR": `Promise error. Use .then()/.catch() or async/await properly:\n${context}`,
+    "PORT_IN_USE": `Port conflict. Use a different port or handle port errors:\n${context}`,
+    "TEST_FAILED": `Test failure. Fix code logic to pass tests:\n${context}`,
+    "ASSERTION_ERROR": `Assertion failed. Review test expectations and fix code:\n${context}`,
+    "CIRCULAR_DEPENDENCY": `Circular dependency detected. Refactor imports to remove cycles:\n${context}`,
+    "STACK_OVERFLOW": `Stack overflow or infinite recursion. Remove infinite loops or recursive calls:\n${context}`,
+    "OUT_OF_MEMORY": `Out of memory. Reduce data processing or use streaming:\n${context}`,
+    "INDENTATION_ERROR": `Python indentation error. Fix spacing (use 4 spaces consistently):\n${context}`,
+    "VALUE_ERROR": `Invalid value in code. Check data validation and type conversions:\n${context}`,
+    "ATTRIBUTE_ERROR": `Object attribute missing. Verify all properties exist before accessing:\n${context}`,
+    "CONNECTION_REFUSED": `Connection error. Check if services are running or use correct addresses:\n${context}`,
+    "CONNECTION_RESET": `Connection lost. Handle connection errors or retry logic:\n${context}`,
+    "PERMISSION_ERROR": `Permission denied. Check file permissions or run with appropriate privileges:\n${context}`,
+    "MISSING_PEER_DEPENDENCY": `Missing peer dependency. Add peer dependency to package.json:\n${context}`,
+    "DEPENDENCY_CONFLICT": `Dependency version conflict. Resolve conflicting package versions:\n${context}`,
+    "DEPRECATED_DEPENDENCY": `Deprecated dependency used. Update to latest compatible version:\n${context}`,
+    "UNKNOWN_ERROR": `Code failed. Debug using error message and fix:\n${context}`,
+  };
+  
+  return prompts[errorType] || prompts["UNKNOWN_ERROR"];
 }
 
 async function validateGeneratedFiles(workspacePath: string, files: { name: string; content: string; language: string }[], language: string): Promise<{ valid: boolean; issues: string[] }> {
@@ -132,9 +276,33 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
 
   // Check if main file exists
   const mainExt = language === "python" ? ".py" : ".js";
-  const mainExists = files.some(f => f.name === `main${mainExt}`);
+  const mainFile = files.find(f => f.name === `main${mainExt}`);
+  const mainExists = !!mainFile;
+  
   if (!mainExists) {
     issues.push(`Missing main${mainExt} entry point`);
+  }
+
+  // Validate file encodings and content
+  for (const file of files) {
+    // Check for encoding issues (invalid UTF-8 sequences)
+    try {
+      Buffer.from(file.content, "utf-8");
+    } catch (e) {
+      issues.push(`${file.name} has encoding issues`);
+    }
+
+    // Check for null bytes or other invalid content
+    if (file.content.includes("\0")) {
+      issues.push(`${file.name} contains null bytes`);
+    }
+
+    // Warn about very long lines (potential encoding or parsing issues)
+    const lines = file.content.split("\n");
+    const longLines = lines.filter(l => l.length > 1000);
+    if (longLines.length > 0) {
+      issues.push(`${file.name} has unusually long lines (possible minified/corrupted content)`);
+    }
   }
 
   // Check package.json consistency for JavaScript
@@ -148,30 +316,37 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
         issues.push(`package.json references main: "${pkg.main}" but file not generated`);
       }
 
-      // Validate scripts
+      // Validate scripts - NO orphaned test scripts
       if (pkg.scripts) {
         for (const [scriptName, scriptCmd] of Object.entries(pkg.scripts)) {
           const cmd = scriptCmd as string;
-          // Check if test script references non-existent test file
-          if (scriptName === "test" && cmd.includes("test")) {
+          // Flag any test script
+          if (scriptName === "test" && cmd !== "echo 'no tests'") {
             const testFileMatch = cmd.match(/(\w+\.test\.js|test_\w+\.js|\w+_test\.js)/);
             if (testFileMatch) {
               const testFile = testFileMatch[1];
               if (!files.some(f => f.name === testFile)) {
-                issues.push(`package.json has test script but test file "${testFile}" not generated`);
+                issues.push(`package.json has "test" script but test file "${testFile}" not generated. Remove test script or generate test file.`);
               }
             }
           }
         }
       }
 
-      // Validate dependencies are present
+      // Validate dependencies exist and are used
       if (pkg.dependencies) {
-        // Check if express is used but not imported properly
-        if (pkg.dependencies.express && mainExists) {
-          const mainFile = files.find(f => f.name === `main${mainExt}`);
-          if (mainFile && !mainFile.content.includes("require('express')") && !mainFile.content.includes('require("express")')) {
-            issues.push("package.json lists express as dependency but main file doesn't import it");
+        for (const dep of Object.keys(pkg.dependencies)) {
+          if (mainExists) {
+            const depPattern = new RegExp(`require\\(['"]${dep}['"]\\)|from ['"]${dep}['"]|import.*from ['"]${dep}['"]`, "i");
+            if (!depPattern.test(mainFile.content)) {
+              // Warn but don't fail - sometimes deps are optional
+              if (dep !== "express" && dep !== "body-parser") {
+                // Only warn for obvious unused deps
+                if (!mainFile.content.includes(dep)) {
+                  issues.push(`package.json lists "${dep}" but main file doesn't use it`);
+                }
+              }
+            }
           }
         }
       }
@@ -180,7 +355,7 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
     }
   }
 
-  // Check for common syntax issues
+  // Check for common syntax issues in all files
   for (const file of files) {
     // JSON validation
     if (file.name.endsWith(".json")) {
@@ -192,13 +367,71 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
     }
 
     // Check for incomplete code (trailing ...)
-    if (file.content.includes("...") && !file.name.endsWith(".md")) {
-      issues.push(`${file.name} appears incomplete (contains ...)`);
+    if (file.content.includes("...") && !file.name.endsWith(".md") && !file.name.endsWith(".txt")) {
+      const lines = file.content.split("\n");
+      const lastLine = lines[lines.length - 1]?.trim();
+      if (lastLine === "...") {
+        issues.push(`${file.name} appears incomplete (ends with ...)`);
+      }
     }
 
-    // Check for TODO/FIXME
+    // Check for unfinished comments
     if ((file.content.includes("TODO") || file.content.includes("FIXME")) && !file.name.endsWith(".md")) {
-      issues.push(`${file.name} contains unfinished TODO/FIXME comments`);
+      // Only flag if it's clearly blocking
+      if (file.content.includes("TODO:") || file.content.includes("FIXME:")) {
+        issues.push(`${file.name} contains unfinished TODO/FIXME - complete the implementation`);
+      }
+    }
+
+    // Check for common async/await issues in JavaScript
+    if ((file.name.endsWith(".js") || file.name.endsWith(".ts")) && mainExists) {
+      // Check for await without async (but allow top-level await in modules)
+      const hasTopLevelAwait = file.content.includes("await ") && !file.content.includes("async ");
+      const isMainFile = file.name === `main${mainExt}`;
+      if (hasTopLevelAwait && !isMainFile) {
+        // Only flag if it's clearly a problem (not in eval/strict context)
+        if (!file.content.includes("\"use strict\"") && !file.content.includes("'use strict'")) {
+          issues.push(`${file.name} uses 'await' but function is not declared as 'async'`);
+        }
+      }
+
+      // Check for unclosed brackets
+      const openBrackets = (file.content.match(/\{/g) || []).length;
+      const closeBrackets = (file.content.match(/\}/g) || []).length;
+      if (openBrackets !== closeBrackets) {
+        issues.push(`${file.name} has mismatched braces (${openBrackets} open, ${closeBrackets} close)`);
+      }
+
+      // Check for unclosed parentheses
+      const openParens = (file.content.match(/\(/g) || []).length;
+      const closeParens = (file.content.match(/\)/g) || []).length;
+      if (openParens !== closeParens) {
+        issues.push(`${file.name} has mismatched parentheses (${openParens} open, ${closeParens} close)`);
+      }
+    }
+
+    // Python-specific checks
+    if (file.name.endsWith(".py")) {
+      // Check for inconsistent indentation
+      const indentations = new Set<number>();
+      for (const line of lines) {
+        if (line.trim()) {
+          const match = line.match(/^( +)/);
+          if (match) indentations.add(match[1].length);
+        }
+      }
+      // Warn if indentation is clearly inconsistent (e.g., 2, 3, 5 spaces)
+      if (indentations.size > 3) {
+        const sorted = [...indentations].sort((a, b) => a - b);
+        const diffs = [];
+        for (let i = 1; i < sorted.length; i++) {
+          diffs.push(sorted[i] - sorted[i - 1]);
+        }
+        // If indents don't follow standard pattern (2, 4, or multiples), warn
+        if (!diffs.every(d => d === 2 || d === 4 || d % 2 === 0)) {
+          issues.push(`${file.name} has inconsistent indentation`);
+        }
+      }
     }
   }
 
@@ -208,60 +441,140 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
   };
 }
 
+function isRealError(output: string): boolean {
+  const lower = output.toLowerCase();
+  
+  // Filter out npm/pip warnings and non-blocking issues
+  const warnings = [
+    "npm warn",
+    "deprecation warning",
+    "deprecated",
+    "peer dep missing",
+    "found 0 vulnerabilities",
+    "audit fix not run",
+    "up to date",
+    "added",
+    "packages",
+  ];
+  
+  // If it's just warnings, it's not a real error
+  if (warnings.some(w => lower.includes(w))) {
+    // But if it has actual error markers, it might still be an error
+    if (!lower.includes("error:") && !lower.includes("failed") && !lower.match(/^\s*error at /m)) {
+      return false;
+    }
+  }
+  
+  // Real error indicators
+  const errorMarkers = [
+    /^error:/m,
+    /syntaxerror/,
+    /typeerror/,
+    /referenceerror/,
+    /^\s+at /m,
+    "thrown",
+    "uncaught",
+    "failed",
+    "traceback",
+  ];
+  
+  return errorMarkers.some(marker => {
+    if (typeof marker === "string") {
+      return lower.includes(marker);
+    } else {
+      return marker.test(lower);
+    }
+  });
+}
+
 async function runTests(workspacePath: string, language: string): Promise<{ passed: boolean; output: string; errors: string | null; errorType?: string }> {
   let cmd = "";
+  let testMethod = "main"; // Track which test method we're using
 
   if (language === "python") {
-    const hasTestFiles = (() => {
+    // Check for pytest-compatible test files
+    const testFiles = (() => {
       try {
-        const out = execSync(`find "${workspacePath}" -name "test_*.py" -o -name "*_test.py" 2>/dev/null`, { encoding: "utf-8" }).trim();
-        return out.length > 0;
-      } catch { return false; }
+        const out = execSync(`find "${workspacePath}" -type f \\( -name "test_*.py" -o -name "*_test.py" \\) 2>/dev/null`, { encoding: "utf-8" }).trim();
+        return out.split("\n").filter(Boolean);
+      } catch { return []; }
     })();
 
-    if (hasTestFiles) {
+    if (testFiles.length > 0) {
       cmd = `cd "${workspacePath}" && timeout 30 python3 -m pytest -v --tb=short 2>&1 || true`;
+      testMethod = "pytest";
     } else {
       cmd = `cd "${workspacePath}" && timeout 30 python3 main.py 2>&1 || true`;
+      testMethod = "main.py";
     }
   } else if (language === "typescript") {
     const hasPkg = existsSync(join(workspacePath, "package.json"));
     if (hasPkg) {
-      const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf-8"));
-      if (pkg.scripts?.test) {
-        cmd = `cd "${workspacePath}" && timeout 30 npm test 2>&1 || true`;
-      } else {
+      try {
+        const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf-8"));
+        if (pkg.scripts?.test && pkg.scripts.test !== "echo 'no test'") {
+          cmd = `cd "${workspacePath}" && timeout 30 npm test 2>&1 || true`;
+          testMethod = "npm test";
+        } else {
+          cmd = `cd "${workspacePath}" && timeout 30 npx ts-node main.ts 2>&1 || true`;
+          testMethod = "ts-node main.ts";
+        }
+      } catch {
         cmd = `cd "${workspacePath}" && timeout 30 npx ts-node main.ts 2>&1 || true`;
+        testMethod = "ts-node main.ts";
       }
     } else {
       cmd = `cd "${workspacePath}" && timeout 30 npx ts-node main.ts 2>&1 || true`;
+      testMethod = "ts-node main.ts";
     }
   } else {
     const hasPkg = existsSync(join(workspacePath, "package.json"));
     if (hasPkg) {
-      const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf-8"));
-      if (pkg.scripts?.test) {
-        cmd = `cd "${workspacePath}" && timeout 30 npm test 2>&1 || true`;
-      } else {
+      try {
+        const pkg = JSON.parse(readFileSync(join(workspacePath, "package.json"), "utf-8"));
+        if (pkg.scripts?.test && pkg.scripts.test !== "echo 'no test'") {
+          cmd = `cd "${workspacePath}" && timeout 30 npm test 2>&1 || true`;
+          testMethod = "npm test";
+        } else {
+          cmd = `cd "${workspacePath}" && timeout 30 node main.js 2>&1 || true`;
+          testMethod = "node main.js";
+        }
+      } catch {
         cmd = `cd "${workspacePath}" && timeout 30 node main.js 2>&1 || true`;
+        testMethod = "node main.js";
       }
     } else {
       cmd = `cd "${workspacePath}" && timeout 30 node main.js 2>&1 || true`;
+      testMethod = "node main.js";
     }
   }
 
   try {
     const { stdout, stderr } = await execAsync(cmd, { timeout: 35000 });
     const output = (stdout + stderr).trim();
-    const lower = output.toLowerCase();
-    const passed = !lower.includes("error") && !lower.includes("failed") && !lower.includes("exception") && !lower.includes("traceback");
-    const errorType = passed ? undefined : detectErrorType(output);
-    return { passed, output: output.slice(0, 5000), errors: passed ? null : output.slice(0, 2000), errorType };
+    
+    // Use sophisticated error detection instead of just checking for keywords
+    const hasRealError = isRealError(output);
+    const errorType = hasRealError ? detectErrorType(output) : undefined;
+    
+    return { 
+      passed: !hasRealError, 
+      output: output.slice(0, 5000), 
+      errors: hasRealError ? output.slice(0, 2000) : null, 
+      errorType 
+    };
   } catch (err: unknown) {
     const error = err as { stdout?: string; stderr?: string; message?: string };
     const output = ((error.stdout || "") + (error.stderr || error.message || "")).trim();
-    const errorType = detectErrorType(output);
-    return { passed: false, output: output.slice(0, 5000), errors: output.slice(0, 2000), errorType };
+    const hasRealError = isRealError(output);
+    const errorType = hasRealError ? detectErrorType(output) : undefined;
+    
+    return { 
+      passed: false, 
+      output: output.slice(0, 5000), 
+      errors: output.slice(0, 2000), 
+      errorType 
+    };
   }
 }
 
@@ -453,8 +766,11 @@ export async function runAgent(sessionId: number) {
         {
           role: "user",
           content: iteration === 1
-            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate complete ${session.language} code:\n1. FIRST line of EVERY code block: // filename: X or # filename: X\n2. Each file in separate markdown code block\n3. For JS: include package.json with ONLY scripts you'll create files for\n4. Create working main.js/main.py that runs without errors\n5. NO test scripts unless you generate test files`
-            : `Task: ${session.task}\n\nIteration ${iteration} FAILED. Errors:\n${lastTestOutput}\n\nFix all issues:\n1. FIRST line MUST be: // filename: main.js or # filename: main.py\n2. Generate package.json with NO test script (just "start")\n3. Create main.js that actually works when run\n4. Complete code only - no placeholders\n5. Ensure all files you reference in package.json are generated`,
+            ? `Task: ${session.task}\n\nPlan:\n${plan}\n\nGenerate complete ${session.language} code:\n1. FIRST line of EVERY code block: // filename: X or # filename: X\n2. Each file in separate markdown code block\n3. For JS: include package.json with ONLY scripts you'll create files for\n4. Create working main.js/main.py that runs without errors\n5. NO test scripts unless you generate test files\n6. Code must be complete and runnable with no placeholders or TODOs`
+            : `Task: ${session.task}\n\nIteration ${iteration} FAILED:\n${generateFixPrompt(
+                detectErrorType(lastTestOutput),
+                lastTestOutput
+              )}\n\nREGENERATE ALL FILES with these rules:\n1. FIRST line MUST be: // filename: X or # filename: X\n2. Each file in its own markdown code block\n3. All referenced files MUST be generated (no orphaned scripts)\n4. Complete code only - no ..., TODO, or FIXME\n5. Ensure imports match dependencies`,
         },
       ];
 
@@ -511,25 +827,12 @@ export async function runAgent(sessionId: number) {
         await addEvent(sessionId, "error", `Tests failed on iteration ${iteration}${errorTypeMsg}:\n${testResult.errors?.slice(0, 800) || testResult.output.slice(0, 800)}`, iteration);
 
         if (iteration < MAX_ITERATIONS) {
-          // Provide targeted guidance based on error type
-          let guidance = "";
-          if (testResult.errorType === "SYNTAX_ERROR") {
-            guidance = "→ Fix syntax errors in the code";
-          } else if (testResult.errorType === "MISSING_MODULE" || testResult.errorType === "MISSING_FILE") {
-            guidance = "→ Ensure all required files are generated. Check if package.json references missing files.";
-          } else if (testResult.errorType === "JSON_ERROR") {
-            guidance = "→ Fix invalid JSON syntax in package.json or other JSON files";
-          } else if (testResult.errorType === "IMPORT_ERROR") {
-            guidance = "→ Fix import statements and module references";
-          } else if (testResult.errorType === "TYPE_ERROR" || testResult.errorType === "REFERENCE_ERROR") {
-            guidance = "→ Fix undefined variables and function calls";
-          } else if (testResult.errorType === "TIMEOUT") {
-            guidance = "→ Code is taking too long. Remove infinite loops or add timeouts.";
-          } else {
-            guidance = "→ Debug and fix the errors above";
-          }
+          // Generate targeted fix prompt based on error type
+          const fixPrompt = testResult.errorType 
+            ? generateFixPrompt(testResult.errorType, lastTestOutput)
+            : "Debug and fix the errors above";
 
-          await addEvent(sessionId, "thought", `Analyzing errors and preparing fix for iteration ${iteration + 1}...\n${guidance}`, iteration);
+          await addEvent(sessionId, "thought", `Analyzing errors and preparing fix for iteration ${iteration + 1}...\n\n${fixPrompt}`, iteration);
         }
       }
     }
