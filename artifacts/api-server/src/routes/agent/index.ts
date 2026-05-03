@@ -42,6 +42,7 @@ router.post("/agent/sessions", async (req, res): Promise<void> => {
   const [session] = await db.insert(sessionsTable).values({
     task: parsed.data.task,
     language: parsed.data.language,
+    model: parsed.data.model || "gpt-4.1",
     status: "pending",
     iterations: 0,
   }).returning();

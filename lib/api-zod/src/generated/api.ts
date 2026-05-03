@@ -22,6 +22,7 @@ export const ListSessionsResponseItem = zod.object({
   id: zod.number(),
   task: zod.string(),
   language: zod.string(),
+  model: zod.string(),
   status: zod.enum([
     "pending",
     "planning",
@@ -44,6 +45,7 @@ export const ListSessionsResponse = zod.array(ListSessionsResponseItem);
 export const CreateSessionBody = zod.object({
   task: zod.string(),
   language: zod.enum(["python", "javascript", "typescript"]),
+  model: zod.enum(["gpt-4.1", "gpt-4o", "gpt-4o-mini"]).optional(),
 });
 
 /**
@@ -57,6 +59,7 @@ export const GetSessionResponse = zod.object({
   id: zod.number(),
   task: zod.string(),
   language: zod.string(),
+  model: zod.string(),
   status: zod.enum([
     "pending",
     "planning",
@@ -130,6 +133,7 @@ export const RerunSessionResponse = zod.object({
   id: zod.number(),
   task: zod.string(),
   language: zod.string(),
+  model: zod.string(),
   status: zod.enum([
     "pending",
     "planning",
@@ -178,6 +182,7 @@ export const CancelSessionResponse = zod.object({
   id: zod.number(),
   task: zod.string(),
   language: zod.string(),
+  model: zod.string(),
   status: zod.enum([
     "pending",
     "planning",

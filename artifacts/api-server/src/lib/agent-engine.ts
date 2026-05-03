@@ -413,6 +413,7 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
     // Python-specific checks
     if (file.name.endsWith(".py")) {
       // Check for inconsistent indentation
+      const lines = file.content.split("\n");
       const indentations = new Set<number>();
       for (const line of lines) {
         if (line.trim()) {
@@ -687,6 +688,24 @@ export async function resetAndRerunAgent(sessionId: number) {
   return runAgent(sessionId);
 }
 
+async function formatCode(workspacePath: string, language: string): Promise<void> {
+  try {
+    if (language === "python") {
+      await execAsync(`cd "${workspacePath}" && python3 -m black . --quiet 2>&1 || true`, { timeout: 15000 });
+    } else {
+      await execAsync(`cd "${workspacePath}" && npx prettier --write "**/*.{js,ts,json}" --log-level silent 2>&1 || true`, { timeout: 15000 });
+    }
+  } catch {
+    // Formatting is best-effort, never block agent
+  }
+}
+
+type IterationRecord = {
+  iteration: number;
+  errorType: string;
+  errorSummary: string;
+};
+
 export async function runAgent(sessionId: number) {
   const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, sessionId));
   if (!session) return;
@@ -700,14 +719,16 @@ export async function runAgent(sessionId: number) {
   const MAX_ITERATIONS = 5;
   let iteration = 0;
   let lastTestOutput = "";
+  const iterationHistory: IterationRecord[] = [];
 
   try {
     // Phase 1: Planning
     await updateStatus(sessionId, "planning");
     await addEvent(sessionId, "thought", `Starting to analyze task: "${session.task}"`, 0);
 
+    const sessionModel = session.model || "gpt-4.1";
     const planResponse = await openai.chat.completions.create({
-      model: "gpt-4.1",
+      model: sessionModel,
       max_completion_tokens: 2048,
       messages: [
         {
@@ -761,6 +782,12 @@ export async function runAgent(sessionId: number) {
     while (iteration < MAX_ITERATIONS) {
       iteration++;
 
+      const historyContext = iterationHistory.length > 0
+        ? `\n\nPREVIOUS FAILED ATTEMPTS:\n${iterationHistory.map(h =>
+            `- Iteration ${h.iteration}: [${h.errorType}] ${h.errorSummary}`
+          ).join("\n")}\n\nDo NOT repeat the same approach that already failed. Try a different implementation strategy.`
+        : "";
+
       const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
         { role: "system", content: systemPrompt },
         {
@@ -770,12 +797,12 @@ export async function runAgent(sessionId: number) {
             : `Task: ${session.task}\n\nIteration ${iteration} FAILED:\n${generateFixPrompt(
                 detectErrorType(lastTestOutput),
                 lastTestOutput
-              )}\n\nREGENERATE ALL FILES with these rules:\n1. FIRST line MUST be: // filename: X or # filename: X\n2. Each file in its own markdown code block\n3. All referenced files MUST be generated (no orphaned scripts)\n4. Complete code only - no ..., TODO, or FIXME\n5. Ensure imports match dependencies`,
+              )}${historyContext}\n\nREGENERATE ALL FILES with these rules:\n1. FIRST line MUST be: // filename: X or # filename: X\n2. Each file in its own markdown code block\n3. All referenced files MUST be generated (no orphaned scripts)\n4. Complete code only - no ..., TODO, or FIXME\n5. Ensure imports match dependencies`,
         },
       ];
 
       const codeResponse = await openai.chat.completions.create({
-        model: "gpt-4.1",
+        model: sessionModel,
         max_completion_tokens: 4096,
         messages,
       });
@@ -815,6 +842,9 @@ export async function runAgent(sessionId: number) {
         iteration,
       });
 
+      // Format code (non-blocking, best-effort)
+      await formatCode(workspacePath, session.language);
+
       if (testResult.passed) {
         await addEvent(sessionId, "success", `All tests passed on iteration ${iteration}! ✓\n\n${testResult.output.slice(0, 800)}`, iteration);
         await gitCommitAll(workspacePath, `chore: tests passing - iteration ${iteration}`);
@@ -824,10 +854,17 @@ export async function runAgent(sessionId: number) {
       } else {
         lastTestOutput = testResult.errors || testResult.output;
         const errorTypeMsg = testResult.errorType ? ` [${testResult.errorType}]` : "";
+        const errorSummary = (testResult.errors || testResult.output).slice(0, 200);
         await addEvent(sessionId, "error", `Tests failed on iteration ${iteration}${errorTypeMsg}:\n${testResult.errors?.slice(0, 800) || testResult.output.slice(0, 800)}`, iteration);
 
+        // Record this failed iteration for memory/context
+        iterationHistory.push({
+          iteration,
+          errorType: testResult.errorType || "UNKNOWN_ERROR",
+          errorSummary,
+        });
+
         if (iteration < MAX_ITERATIONS) {
-          // Generate targeted fix prompt based on error type
           const fixPrompt = testResult.errorType 
             ? generateFixPrompt(testResult.errorType, lastTestOutput)
             : "Debug and fix the errors above";

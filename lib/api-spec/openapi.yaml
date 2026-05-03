@@ -428,6 +428,9 @@ components:
         language:
           type: string
           enum: [python, javascript, typescript]
+        model:
+          type: string
+          enum: [gpt-4.1, gpt-4o, gpt-4o-mini]
       required:
         - task
         - language
@@ -440,6 +443,8 @@ components:
         task:
           type: string
         language:
+          type: string
+        model:
           type: string
         status:
           type: string
@@ -454,6 +459,7 @@ components:
         - id
         - task
         - language
+        - model
         - status
         - iterations
         - createdAt
@@ -467,6 +473,8 @@ components:
         task:
           type: string
         language:
+          type: string
+        model:
           type: string
         status:
           type: string
@@ -493,6 +501,7 @@ components:
         - id
         - task
         - language
+        - model
         - status
         - iterations
         - createdAt

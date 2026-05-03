@@ -6,6 +6,7 @@ export const sessionsTable = pgTable("sessions", {
   id: serial("id").primaryKey(),
   task: text("task").notNull(),
   language: text("language").notNull().default("python"),
+  model: text("model").notNull().default("gpt-4.1"),
   status: text("status").notNull().default("pending"),
   iterations: integer("iterations").notNull().default(0),
   workspacePath: text("workspace_path"),

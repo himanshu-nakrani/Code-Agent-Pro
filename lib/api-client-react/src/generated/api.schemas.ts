@@ -22,9 +22,19 @@ export const CreateSessionBodyLanguage = {
   typescript: "typescript",
 } as const;
 
+export type CreateSessionBodyModel =
+  (typeof CreateSessionBodyModel)[keyof typeof CreateSessionBodyModel];
+
+export const CreateSessionBodyModel = {
+  "gpt-41": "gpt-4.1",
+  "gpt-4o": "gpt-4o",
+  "gpt-4o-mini": "gpt-4o-mini",
+} as const;
+
 export interface CreateSessionBody {
   task: string;
   language: CreateSessionBodyLanguage;
+  model?: CreateSessionBodyModel;
 }
 
 export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
@@ -44,6 +54,7 @@ export interface Session {
   id: number;
   task: string;
   language: string;
+  model: string;
   status: SessionStatus;
   iterations: number;
   createdAt: string;
@@ -111,6 +122,7 @@ export interface SessionDetail {
   id: number;
   task: string;
   language: string;
+  model: string;
   status: SessionDetailStatus;
   iterations: number;
   createdAt: string;

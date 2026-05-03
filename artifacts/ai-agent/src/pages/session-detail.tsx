@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useRoute } from "wouter";
 import {
   useCancelSession,
@@ -23,8 +23,12 @@ import { format, isValid, formatDistanceToNow } from "date-fns";
 import { useSSE } from "@/hooks/use-sse";
 import {
   Activity,
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ClipboardCheck,
+  Copy,
+  Cpu,
   Download,
   FileCode,
   GitBranch,
@@ -41,6 +45,7 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,6 +169,7 @@ export default function SessionDetail() {
   const updateFile = useUpdateFile();
   const gitCommitMutation = useGitCommit();
 
+  const { toast } = useToast();
   const [editingFileId, setEditingFileId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState("");
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
@@ -171,6 +177,14 @@ export default function SessionDetail() {
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
   const [gitCommitMessage, setGitCommitMessage] = useState("");
   const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set());
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = useCallback((text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 1800);
+    });
+  }, []);
 
   const { data: session, isLoading: isLoadingSession } = useGetSession(sessionId!, {
     query: {
@@ -242,9 +256,16 @@ export default function SessionDetail() {
       if (!sessionId) return;
       queryClient.invalidateQueries({ queryKey: getGetSessionQueryKey(sessionId) });
     },
-    onComplete: () => {
+    onComplete: (finalStatus) => {
       if (!sessionId) return;
       invalidateAll();
+      if (finalStatus === "done") {
+        toast({ title: "Agent complete", description: "All tests passed successfully." });
+      } else if (finalStatus === "failed") {
+        toast({ title: "Agent failed", description: "Max iterations reached without passing tests.", variant: "destructive" });
+      } else if (finalStatus === "cancelled") {
+        toast({ title: "Session cancelled", description: "The agent run was stopped." });
+      }
     },
   });
 
@@ -383,6 +404,13 @@ export default function SessionDetail() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />LIVE
             </Badge>
           )}
+
+          {session.model && (
+            <Badge variant="outline" className="font-mono text-[10px] rounded-none uppercase border-border text-muted-foreground/60 shrink-0 hidden sm:flex items-center gap-1">
+              <Cpu className="w-2.5 h-2.5" />
+              {session.model}
+            </Badge>
+          )}
           <div className="font-mono text-xs text-muted-foreground truncate hidden md:block max-w-[300px]">
             {session.task}
           </div>
@@ -486,12 +514,22 @@ export default function SessionDetail() {
                   <span className="truncate">{selectedFile.name}</span>
                   <div className="flex items-center gap-1 shrink-0">
                     <span className="text-muted-foreground/50">{selectedFile.language}</span>
+                    <button
+                      onClick={() => handleCopy(selectedFile.content, `file-${selectedFile.id}`)}
+                      className="ml-1 p-0.5 text-muted-foreground hover:text-primary transition-colors"
+                      title="Copy file contents"
+                    >
+                      {copiedId === `file-${selectedFile.id}`
+                        ? <ClipboardCheck className="w-3 h-3 text-emerald-400" />
+                        : <Copy className="w-3 h-3" />
+                      }
+                    </button>
                     {editingFileId === selectedFile.id ? (
                       <>
                         <button
                           onClick={handleSaveEdit}
                           disabled={updateFile.isPending}
-                          className="ml-1 p-0.5 text-emerald-400 hover:text-emerald-300 transition-colors"
+                          className="p-0.5 text-emerald-400 hover:text-emerald-300 transition-colors"
                           title="Save"
                         >
                           <Save className="w-3 h-3" />
@@ -507,7 +545,7 @@ export default function SessionDetail() {
                     ) : (
                       <button
                         onClick={() => { setEditingFileId(selectedFile.id); setEditContent(selectedFile.content); }}
-                        className="ml-1 p-0.5 text-muted-foreground hover:text-primary transition-colors"
+                        className="p-0.5 text-muted-foreground hover:text-primary transition-colors"
                         title="Edit"
                       >
                         <Pencil className="w-3 h-3" />
@@ -641,7 +679,7 @@ export default function SessionDetail() {
                         </span>
                       )}
                     </div>
-                    <div className={`font-mono text-[11px] whitespace-pre-wrap break-words leading-relaxed ${
+                    <div className={`font-mono text-[11px] whitespace-pre-wrap break-words leading-relaxed relative group ${
                       event.type === "error"
                         ? "text-red-400/90 bg-red-500/10 p-2 border border-red-500/20 rounded-sm"
                         : event.type === "success"
@@ -651,6 +689,18 @@ export default function SessionDetail() {
                         : "text-foreground/75"
                     }`}>
                       {event.content}
+                      {(event.type === "code" || event.type === "error") && (
+                        <button
+                          onClick={() => handleCopy(event.content, `event-${event.id}`)}
+                          className="absolute top-1 right-1 p-0.5 text-muted-foreground hover:text-foreground transition-colors opacity-0 group-hover:opacity-100"
+                          title="Copy"
+                        >
+                          {copiedId === `event-${event.id}`
+                            ? <ClipboardCheck className="w-2.5 h-2.5 text-emerald-400" />
+                            : <Copy className="w-2.5 h-2.5" />
+                          }
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -708,6 +758,40 @@ export default function SessionDetail() {
                     </div>
                   </div>
                 </div>
+
+                {/* Error summary — shown when session failed */}
+                {session.status === "failed" && stats.failedTests > 0 && (
+                  <div className="border-b border-red-500/30 bg-red-500/5 p-2 shrink-0">
+                    <div className="flex items-center gap-1.5 mb-1.5">
+                      <AlertTriangle className="w-3 h-3 text-red-400 shrink-0" />
+                      <span className="font-mono text-[10px] uppercase font-bold text-red-400">
+                        Last failure
+                      </span>
+                    </div>
+                    {(() => {
+                      const lastFail = [...testResults].reverse().find(t => !t.passed);
+                      if (!lastFail) return null;
+                      const errorText = (lastFail.errors || lastFail.output).slice(0, 300);
+                      return (
+                        <div className="relative group">
+                          <pre className="font-mono text-[9px] text-red-400/80 whitespace-pre-wrap break-words leading-relaxed bg-red-500/10 border border-red-500/20 rounded-sm p-2 max-h-[80px] overflow-y-auto">
+                            {errorText}
+                          </pre>
+                          <button
+                            onClick={() => handleCopy(lastFail.errors || lastFail.output, "last-error")}
+                            className="absolute top-1 right-1 p-0.5 text-red-400/50 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                            title="Copy error"
+                          >
+                            {copiedId === "last-error"
+                              ? <ClipboardCheck className="w-2.5 h-2.5" />
+                              : <Copy className="w-2.5 h-2.5" />
+                            }
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 <ScrollArea className="flex-1">
                   <div className="p-3 flex flex-col gap-3">

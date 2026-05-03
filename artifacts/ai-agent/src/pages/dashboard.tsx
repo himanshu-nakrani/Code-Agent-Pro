@@ -23,6 +23,8 @@ import {
   ChevronRight,
   Loader2,
   Sparkles,
+  Cpu,
+  Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -126,11 +128,26 @@ export default function Dashboard() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
   const [newLang, setNewLang] = useState<"python" | "javascript" | "typescript">("python");
+  const [newModel, setNewModel] = useState<"gpt-4.1" | "gpt-4o" | "gpt-4o-mini">("gpt-4.1");
+  const [filterLang, setFilterLang] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+
+  // Cmd+K / Ctrl+K shortcut to open new session dialog
+  React.useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setIsDialogOpen(true);
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, []);
 
   const handleCreate = () => {
     if (!newTask.trim()) return;
     createSession.mutate(
-      { data: { task: newTask, language: newLang } },
+      { data: { task: newTask, language: newLang, model: newModel } },
       {
         onSuccess: (res) => {
           setIsDialogOpen(false);
@@ -197,12 +214,18 @@ export default function Dashboard() {
     }
   };
 
-  // Sorted newest-first
+  // Sorted newest-first, with language + status filters applied to completed
   const sortedSessions = [...(sessions ?? [])].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
   const activeSessions = sortedSessions.filter((s) => ACTIVE_STATUSES.includes(s.status));
-  const completedSessions = sortedSessions.filter((s) => TERMINAL_STATUSES.includes(s.status));
+  const completedSessions = sortedSessions.filter((s) => {
+    if (!TERMINAL_STATUSES.includes(s.status)) return false;
+    if (filterLang !== "all" && s.language !== filterLang) return false;
+    if (filterStatus !== "all" && s.status !== filterStatus) return false;
+    return true;
+  });
+  const hasFilters = filterLang !== "all" || filterStatus !== "all";
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -241,6 +264,7 @@ export default function Dashboard() {
                 <Button variant="default" className="font-mono text-sm gap-2">
                   <Plus className="w-4 h-4" />
                   NEW SESSION
+                  <span className="hidden sm:inline font-mono text-[10px] opacity-50 border border-current/30 px-1 py-0.5 rounded-sm">⌘K</span>
                 </Button>
               </DialogTrigger>
               <DialogContent className="sm:max-w-[560px] border-border bg-card">
@@ -299,28 +323,55 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <Label
-                      htmlFor="language"
-                      className="font-mono text-xs text-muted-foreground uppercase"
-                    >
-                      Runtime
-                    </Label>
-                    <Select
-                      value={newLang}
-                      onValueChange={(val: "python" | "javascript" | "typescript") =>
-                        setNewLang(val)
-                      }
-                    >
-                      <SelectTrigger className="font-mono bg-background border-input rounded-none">
-                        <SelectValue placeholder="Select runtime" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="python">🐍 Python 3</SelectItem>
-                        <SelectItem value="javascript">🟨 Node.js / JavaScript</SelectItem>
-                        <SelectItem value="typescript">🔷 TypeScript</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex flex-col gap-2">
+                      <Label
+                        htmlFor="language"
+                        className="font-mono text-xs text-muted-foreground uppercase"
+                      >
+                        Runtime
+                      </Label>
+                      <Select
+                        value={newLang}
+                        onValueChange={(val: "python" | "javascript" | "typescript") =>
+                          setNewLang(val)
+                        }
+                      >
+                        <SelectTrigger className="font-mono bg-background border-input rounded-none">
+                          <SelectValue placeholder="Select runtime" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="python">🐍 Python 3</SelectItem>
+                          <SelectItem value="javascript">🟨 Node.js / JavaScript</SelectItem>
+                          <SelectItem value="typescript">🔷 TypeScript</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <Label
+                        htmlFor="model"
+                        className="font-mono text-xs text-muted-foreground uppercase flex items-center gap-1"
+                      >
+                        <Cpu className="w-3 h-3" />
+                        AI Model
+                      </Label>
+                      <Select
+                        value={newModel}
+                        onValueChange={(val: "gpt-4.1" | "gpt-4o" | "gpt-4o-mini") =>
+                          setNewModel(val)
+                        }
+                      >
+                        <SelectTrigger className="font-mono bg-background border-input rounded-none">
+                          <SelectValue placeholder="Select model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="gpt-4.1">GPT-4.1 (default)</SelectItem>
+                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </div>
                 <DialogFooter>
@@ -450,12 +501,47 @@ export default function Dashboard() {
 
         {/* Completed / All Sessions */}
         <div>
-          <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground">
-            {activeSessions.length > 0 ? "Completed" : "Recent Directives"}
-            {!isLoadingSessions && completedSessions.length > 0 && (
-              <span className="ml-2 text-muted-foreground/40">({completedSessions.length})</span>
-            )}
-          </h2>
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <h2 className="text-xs font-mono font-bold uppercase text-muted-foreground flex items-center gap-2 shrink-0">
+              {activeSessions.length > 0 ? "Completed" : "Recent Directives"}
+              {!isLoadingSessions && completedSessions.length > 0 && (
+                <span className="text-muted-foreground/40">({completedSessions.length})</span>
+              )}
+            </h2>
+            <div className="flex items-center gap-2">
+              <Filter className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+              <Select value={filterLang} onValueChange={setFilterLang}>
+                <SelectTrigger className="font-mono text-[10px] h-7 rounded-none bg-background border-input w-[110px]">
+                  <SelectValue placeholder="Language" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="font-mono text-xs">All langs</SelectItem>
+                  <SelectItem value="python" className="font-mono text-xs">Python</SelectItem>
+                  <SelectItem value="javascript" className="font-mono text-xs">JavaScript</SelectItem>
+                  <SelectItem value="typescript" className="font-mono text-xs">TypeScript</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="font-mono text-[10px] h-7 rounded-none bg-background border-input w-[100px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="font-mono text-xs">All status</SelectItem>
+                  <SelectItem value="done" className="font-mono text-xs">Done</SelectItem>
+                  <SelectItem value="failed" className="font-mono text-xs">Failed</SelectItem>
+                  <SelectItem value="cancelled" className="font-mono text-xs">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+              {hasFilters && (
+                <button
+                  onClick={() => { setFilterLang("all"); setFilterStatus("all"); }}
+                  className="font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+            </div>
+          </div>
 
           <div className="grid gap-2">
             {isLoadingSessions &&
@@ -520,6 +606,13 @@ export default function Dashboard() {
                         className={`font-mono text-[9px] rounded-none uppercase border shrink-0 ${getLangColor(session.language)}`}
                       >
                         {session.language}
+                      </Badge>
+                      <Badge
+                        variant="outline"
+                        className="font-mono text-[9px] rounded-none uppercase border shrink-0 text-muted-foreground/70 border-border"
+                      >
+                        <Cpu className="w-2 h-2 mr-0.5" />
+                        {session.model}
                       </Badge>
                     </div>
                     <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
