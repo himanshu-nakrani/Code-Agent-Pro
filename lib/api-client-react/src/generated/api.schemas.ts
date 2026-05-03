@@ -37,6 +37,10 @@ export interface CreateSessionBody {
   model?: CreateSessionBodyModel;
 }
 
+export interface ArchiveSessionBody {
+  archived: boolean;
+}
+
 export type SessionStatus = (typeof SessionStatus)[keyof typeof SessionStatus];
 
 export const SessionStatus = {
@@ -57,6 +61,10 @@ export interface Session {
   model: string;
   status: SessionStatus;
   iterations: number;
+  tokenUsage: number;
+  archived: boolean;
+  /** @nullable */
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -125,6 +133,10 @@ export interface SessionDetail {
   model: string;
   status: SessionDetailStatus;
   iterations: number;
+  tokenUsage: number;
+  archived: boolean;
+  /** @nullable */
+  completedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   files: AgentFile[];
@@ -139,6 +151,8 @@ export interface AgentStats {
   successRate: number;
   avgIterations: number;
   totalFilesGenerated: number;
+  totalTokensUsed: number;
+  avgDurationSeconds: number;
 }
 
 export interface GitStatus {

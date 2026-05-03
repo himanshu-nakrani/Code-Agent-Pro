@@ -1,4 +1,4 @@
-import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, timestamp, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -11,6 +11,9 @@ export const sessionsTable = pgTable("sessions", {
   iterations: integer("iterations").notNull().default(0),
   workspacePath: text("workspace_path"),
   gitInitialized: text("git_initialized").notNull().default("false"),
+  tokenUsage: integer("token_usage").notNull().default(0),
+  archived: boolean("archived").notNull().default(false),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

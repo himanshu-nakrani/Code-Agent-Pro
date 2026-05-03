@@ -99,6 +99,37 @@ paths:
         "204":
           description: Deleted
 
+  /agent/sessions/{id}/archive:
+    patch:
+      operationId: archiveSession
+      tags: [agent]
+      summary: Archive or unarchive a session (soft-delete)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArchiveSessionBody"
+      responses:
+        "200":
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /agent/sessions/{id}/rerun:
     post:
       operationId: rerunSession
@@ -260,6 +291,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentStats"
+
+  /agent/stats/export:
+    get:
+      operationId: exportStats
+      tags: [agent]
+      summary: Export all sessions as CSV
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
 
   /agent/sessions/{id}/git/status:
     get:
@@ -475,6 +519,14 @@ components:
         - task
         - language
 
+    ArchiveSessionBody:
+      type: object
+      properties:
+        archived:
+          type: boolean
+      required:
+        - archived
+
     Session:
       type: object
       properties:
@@ -491,6 +543,12 @@ components:
           enum: [pending, planning, coding, testing, iterating, done, failed, cancelled]
         iterations:
           type: integer
+        tokenUsage:
+          type: integer
+        archived:
+          type: boolean
+        completedAt:
+          type: ["string", "null"]
         createdAt:
           type: string
         updatedAt:
@@ -502,6 +560,8 @@ components:
         - model
         - status
         - iterations
+        - tokenUsage
+        - archived
         - createdAt
         - updatedAt
 
@@ -521,6 +581,12 @@ components:
           enum: [pending, planning, coding, testing, iterating, done, failed, cancelled]
         iterations:
           type: integer
+        tokenUsage:
+          type: integer
+        archived:
+          type: boolean
+        completedAt:
+          type: ["string", "null"]
         createdAt:
           type: string
         updatedAt:
@@ -544,6 +610,8 @@ components:
         - model
         - status
         - iterations
+        - tokenUsage
+        - archived
         - createdAt
         - updatedAt
         - files
@@ -640,6 +708,10 @@ components:
           type: number
         totalFilesGenerated:
           type: integer
+        totalTokensUsed:
+          type: integer
+        avgDurationSeconds:
+          type: number
       required:
         - totalSessions
         - completedSessions
@@ -647,6 +719,8 @@ components:
         - successRate
         - avgIterations
         - totalFilesGenerated
+        - totalTokensUsed
+        - avgDurationSeconds
 
     GitStatus:
       type: object

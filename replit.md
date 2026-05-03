@@ -33,18 +33,26 @@
 - **Markdown rendering**: plan + thought events rendered via react-markdown + remark-gfm (bold, lists, inline code, headers)
 - **Session tags**: localStorage-persisted per-session tags with add/remove UI (`forge-tags-${sessionId}`)
 - **JSON export**: `/api/agent/sessions/:id/export` — full structured JSON dump (session + files + events)
+- **CSV export**: `GET /api/agent/stats/export` — all sessions as downloadable CSV (id, task, lang, model, status, iterations, tokenUsage, archived, createdAt, completedAt)
 - **Model stats widget**: dashboard shows per-model performance card (success %, avg iterations, runs)
 - **Mobile panel switcher**: badges select Workspace / Stream / Telemetry on narrow viewports
-- **Prompt inspector tab**: 4th right-panel tab showing task directive, session context grid, system prompt summary, thought log
+- **Prompt inspector tab**: 4th right-panel tab showing task directive, session context grid, system prompt summary, token usage, thought log
 - Test result parsing: extracts individual test names from pytest/jest/mocha/tap output
 - **Error summary panel**: shown in Tests tab when session fails — highlights the last failed test output with copy button
-- **Copy buttons**: on file viewer header and code/error event blocks (clipboard icon → checkmark animation)
+- **Copy buttons**: on file viewer header and code/error event blocks + copy session ID in header
 - **Toast notifications**: fires when SSE completes with done/failed/cancelled status
 - **Keyboard shortcut**: Cmd+K / Ctrl+K opens new session dialog from anywhere
+- **Dashboard search**: text search bar filters completed sessions by task text in real-time
+- **Bulk select + delete**: checkbox select mode with bulk archive and bulk delete actions
+- **Archive/restore**: soft-delete sessions via Archive button; archived sessions shown in collapsed section with Restore option
+- **Execution timer**: live elapsed time badge shown in session-detail header while session is running
+- **Event pagination**: event stream paginated at 50 events per page; auto-advances to last page while running
 - Dashboard filter bar: language and status filters for completed sessions (client-side, no API changes)
 - Dashboard sorted newest-first, with language + model badges, relative timestamps, live active-session auto-refresh
 - Theme system: warm (default), minimal, playful, bold — stored in localStorage
 - Auto-navigate to session detail after session creation
+- **Rate limiting**: POST /agent/sessions limited to 10 req/min per IP (express-rate-limit)
+- **Workspace cleanup**: stale agent workspaces (>7 days) deleted on server startup
 
 ## SSE Hook (`use-sse.ts`)
 
@@ -55,12 +63,10 @@
 
 ## Database Tables
 
-- `sessions` — agent task sessions with status/language/model/iterations/workspacePath/gitInitialized
+- `sessions` — agent task sessions with status/language/model/iterations/workspacePath/gitInitialized/tokenUsage/archived/completedAt
 - `agent_files` — generated code files per session
 - `agent_events` — agent thoughts, plans, code writes, test results (event log)
 - `test_results` — per-iteration test run results (passed, output, errors, iteration)
-- `conversations` — OpenAI chat conversations
-- `messages` — chat messages
 
 ## Key Commands
 

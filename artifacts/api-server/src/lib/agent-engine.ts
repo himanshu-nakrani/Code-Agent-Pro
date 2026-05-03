@@ -19,8 +19,13 @@ async function addEvent(sessionId: number, type: string, content: string, iterat
   await db.insert(agentEventsTable).values({ sessionId, type, content, iteration });
 }
 
-async function updateStatus(sessionId: number, status: string) {
-  await db.update(sessionsTable).set({ status, updatedAt: new Date() }).where(eq(sessionsTable.id, sessionId));
+const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
+
+async function updateStatus(sessionId: number, status: string, extra?: Partial<typeof sessionsTable.$inferInsert>) {
+  const completedAt = TERMINAL_STATUSES.includes(status) ? new Date() : undefined;
+  await db.update(sessionsTable)
+    .set({ status, updatedAt: new Date(), ...(completedAt ? { completedAt } : {}), ...extra })
+    .where(eq(sessionsTable.id, sessionId));
 }
 
 async function saveFiles(sessionId: number, files: { name: string; content: string; language: string }[]) {
@@ -676,6 +681,8 @@ export async function resetAndRerunAgent(sessionId: number) {
     status: "pending",
     iterations: 0,
     gitInitialized: "false",
+    tokenUsage: 0,
+    completedAt: null,
     updatedAt: new Date(),
   }).where(eq(sessionsTable.id, sessionId));
 
@@ -721,6 +728,8 @@ export async function runAgent(sessionId: number) {
   let lastTestOutput = "";
   const iterationHistory: IterationRecord[] = [];
 
+  let totalTokens = 0;
+
   try {
     // Phase 1: Planning
     await updateStatus(sessionId, "planning");
@@ -739,6 +748,7 @@ export async function runAgent(sessionId: number) {
       ],
     });
 
+    totalTokens += planResponse.usage?.total_tokens ?? 0;
     const plan = planResponse.choices[0]?.message?.content || "No plan generated";
     await addEvent(sessionId, "plan", plan, 0);
 
@@ -807,6 +817,7 @@ export async function runAgent(sessionId: number) {
         messages,
       });
 
+      totalTokens += codeResponse.usage?.total_tokens ?? 0;
       const codeContent = codeResponse.choices[0]?.message?.content || "";
       await addEvent(sessionId, "code", `Generated code (iteration ${iteration}):\n\n${codeContent.slice(0, 1200)}${codeContent.length > 1200 ? "..." : ""}`, iteration);
 
@@ -848,8 +859,7 @@ export async function runAgent(sessionId: number) {
       if (testResult.passed) {
         await addEvent(sessionId, "success", `All tests passed on iteration ${iteration}! ✓\n\n${testResult.output.slice(0, 800)}`, iteration);
         await gitCommitAll(workspacePath, `chore: tests passing - iteration ${iteration}`);
-        await updateStatus(sessionId, "done");
-        await db.update(sessionsTable).set({ iterations: iteration }).where(eq(sessionsTable.id, sessionId));
+        await updateStatus(sessionId, "done", { iterations: iteration, tokenUsage: totalTokens });
         return;
       } else {
         lastTestOutput = testResult.errors || testResult.output;
@@ -876,11 +886,11 @@ export async function runAgent(sessionId: number) {
 
     // Max iterations reached
     await addEvent(sessionId, "error", `Reached maximum iterations (${MAX_ITERATIONS}) without passing tests. Marking as failed.`, iteration);
-    await db.update(sessionsTable).set({ status: "failed", iterations: iteration }).where(eq(sessionsTable.id, sessionId));
+    await updateStatus(sessionId, "failed", { iterations: iteration, tokenUsage: totalTokens });
 
   } catch (err) {
     logger.error({ err, sessionId }, "Agent engine error");
     await addEvent(sessionId, "error", `Agent encountered an unexpected error: ${err instanceof Error ? err.message : String(err)}`, iteration);
-    await updateStatus(sessionId, "failed");
+    await updateStatus(sessionId, "failed", { tokenUsage: totalTokens });
   }
 }

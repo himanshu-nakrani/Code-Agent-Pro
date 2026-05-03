@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
-import { eq, sql, avg } from "drizzle-orm";
+import { eq, sql, avg, sum } from "drizzle-orm";
 import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync } from "fs";
 import { join } from "path";
 import archiver from "archiver";
+import rateLimit from "express-rate-limit";
 import { db, sessionsTable, agentFilesTable, agentEventsTable, testResultsTable } from "@workspace/db";
 import {
   CreateSessionBody,
@@ -20,10 +21,41 @@ import {
   UpdateFileBody,
   UpdateFileParams,
   RerunSessionParams,
+  ArchiveSessionBody,
 } from "@workspace/api-zod";
 import { runAgent, resetAndRerunAgent, getWorkspacePath } from "../../lib/agent-engine";
 
 const router: IRouter = Router();
+
+// Rate limit session creation to 10 per minute per IP
+const createSessionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: "Too many sessions created, please wait a minute." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Workspace cleanup: remove workspaces older than 7 days
+function cleanupOldWorkspaces() {
+  const WORKSPACES_DIR = "/tmp/agent-workspaces";
+  const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  try {
+    const entries = readdirSync(WORKSPACES_DIR, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const fullPath = join(WORKSPACES_DIR, entry.name);
+      try {
+        const st = statSync(fullPath);
+        if (Date.now() - st.mtimeMs > MAX_AGE_MS) {
+          rmSync(fullPath, { recursive: true, force: true });
+        }
+      } catch { /* ignore */ }
+    }
+  } catch { /* workspaces dir may not exist yet */ }
+}
+// Run cleanup on startup (non-blocking)
+setTimeout(cleanupOldWorkspaces, 5000);
 
 // List sessions
 router.get("/agent/sessions", async (req, res): Promise<void> => {
@@ -31,8 +63,8 @@ router.get("/agent/sessions", async (req, res): Promise<void> => {
   res.json(sessions);
 });
 
-// Create session
-router.post("/agent/sessions", async (req, res): Promise<void> => {
+// Create session (rate-limited)
+router.post("/agent/sessions", createSessionLimiter, async (req, res): Promise<void> => {
   const parsed = CreateSessionBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
@@ -221,6 +253,30 @@ router.get("/agent/sessions/:id/export", async (req, res): Promise<void> => {
   });
 });
 
+// Archive / unarchive session
+router.patch("/agent/sessions/:id/archive", async (req, res): Promise<void> => {
+  const params = GetSessionParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const body = ArchiveSessionBody.safeParse(req.body);
+  if (!body.success) {
+    res.status(400).json({ error: body.error.message });
+    return;
+  }
+  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, params.data.id));
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+  const [updated] = await db.update(sessionsTable)
+    .set({ archived: body.data.archived, updatedAt: new Date() })
+    .where(eq(sessionsTable.id, params.data.id))
+    .returning();
+  res.json(updated);
+});
+
 // Cancel session
 router.post("/agent/sessions/:id/cancel", async (req, res): Promise<void> => {
   const params = CancelSessionParams.safeParse(req.params);
@@ -236,7 +292,7 @@ router.post("/agent/sessions/:id/cancel", async (req, res): Promise<void> => {
   }
 
   const [updated] = await db.update(sessionsTable)
-    .set({ status: "cancelled", updatedAt: new Date() })
+    .set({ status: "cancelled", completedAt: new Date(), updatedAt: new Date() })
     .where(eq(sessionsTable.id, params.data.id))
     .returning();
 
@@ -347,6 +403,8 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     completed: sql<number>`count(*) filter (where status = 'done')`,
     failed: sql<number>`count(*) filter (where status = 'failed')`,
     avgIter: avg(sessionsTable.iterations),
+    totalTokens: sum(sessionsTable.tokenUsage),
+    avgDuration: sql<number>`avg(extract(epoch from (completed_at - created_at))) filter (where completed_at is not null)`,
   }).from(sessionsTable);
 
   const [fileCount] = await db.select({ total: sql<number>`count(*)` }).from(agentFilesTable);
@@ -363,7 +421,31 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     successRate: Math.round(successRate * 10) / 10,
     avgIterations: Math.round(Number(totals?.avgIter || 0) * 10) / 10,
     totalFilesGenerated: Number(fileCount?.total || 0),
+    totalTokensUsed: Number(totals?.totalTokens || 0),
+    avgDurationSeconds: Math.round(Number(totals?.avgDuration || 0)),
   });
+});
+
+// CSV export of all sessions
+router.get("/agent/stats/export", async (_req, res): Promise<void> => {
+  const sessions = await db.select().from(sessionsTable).orderBy(sessionsTable.createdAt);
+  const header = "id,task,language,model,status,iterations,tokenUsage,archived,createdAt,completedAt\n";
+  const rows = sessions.map(s => [
+    s.id,
+    `"${(s.task || "").replace(/"/g, '""')}"`,
+    s.language,
+    s.model,
+    s.status,
+    s.iterations,
+    s.tokenUsage,
+    s.archived,
+    s.createdAt?.toISOString() ?? "",
+    s.completedAt?.toISOString() ?? "",
+  ].join(",")).join("\n");
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="forge_sessions_${Date.now()}.csv"`);
+  res.send(header + rows);
 });
 
 // Per-model performance stats

@@ -6,10 +6,12 @@ import {
   useGetModelStats,
   useCreateSession,
   useDeleteSession,
+  useArchiveSession,
   getListSessionsQueryKey,
   getGetAgentStatsQueryKey,
   getGetModelStatsQueryKey,
 } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNowStrict, isValid } from "date-fns";
 import {
   Terminal,
@@ -27,6 +29,11 @@ import {
   Sparkles,
   Cpu,
   Filter,
+  Search,
+  FileDown,
+  Archive,
+  CheckSquare2,
+  Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,6 +136,8 @@ export default function Dashboard() {
 
   const createSession = useCreateSession();
   const deleteSession = useDeleteSession();
+  const archiveSession = useArchiveSession();
+  const queryClient = useQueryClient();
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newTask, setNewTask] = useState("");
@@ -136,6 +145,9 @@ export default function Dashboard() {
   const [newModel, setNewModel] = useState<"gpt-4.1" | "gpt-4o" | "gpt-4o-mini">("gpt-4.1");
   const [filterLang, setFilterLang] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   // Cmd+K / Ctrl+K shortcut to open new session dialog
   React.useEffect(() => {
@@ -169,6 +181,45 @@ export default function Dashboard() {
     if (confirm("Delete this session and all its files?")) {
       deleteSession.mutate({ id }, { onSuccess: () => refetchSessions() });
     }
+  };
+
+  const handleArchive = (id: number, archived: boolean, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    archiveSession.mutate(
+      { id, data: { archived } },
+      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getListSessionsQueryKey() }) }
+    );
+  };
+
+  const toggleSelect = (id: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = () => {
+    if (!confirm(`Delete ${selectedIds.size} session(s) and all their files?`)) return;
+    const ids = Array.from(selectedIds);
+    Promise.all(ids.map((id) => deleteSession.mutateAsync({ id }))).then(() => {
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      refetchSessions();
+    });
+  };
+
+  const handleBulkArchive = () => {
+    const ids = Array.from(selectedIds);
+    Promise.all(ids.map((id) => archiveSession.mutateAsync({ id, data: { archived: true } }))).then(() => {
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      queryClient.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+    });
   };
 
   const applyTemplate = (t: (typeof TASK_TEMPLATES)[number]) => {
@@ -219,18 +270,24 @@ export default function Dashboard() {
     }
   };
 
-  // Sorted newest-first, with language + status filters applied to completed
+  // Sorted newest-first, with language + status + search filters applied to completed
   const sortedSessions = [...(sessions ?? [])].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
   const activeSessions = sortedSessions.filter((s) => ACTIVE_STATUSES.includes(s.status));
   const completedSessions = sortedSessions.filter((s) => {
     if (!TERMINAL_STATUSES.includes(s.status)) return false;
+    if (s.archived) return false;
     if (filterLang !== "all" && s.language !== filterLang) return false;
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      if (!s.task.toLowerCase().includes(q)) return false;
+    }
     return true;
   });
-  const hasFilters = filterLang !== "all" || filterStatus !== "all";
+  const archivedSessions = sortedSessions.filter((s) => s.archived);
+  const hasFilters = filterLang !== "all" || filterStatus !== "all" || !!searchQuery.trim();
 
   return (
     <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
@@ -555,14 +612,24 @@ export default function Dashboard() {
 
         {/* Completed / All Sessions */}
         <div>
-          <div className="flex items-center justify-between mb-3 gap-3">
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 className="text-xs font-mono font-bold uppercase text-muted-foreground flex items-center gap-2 shrink-0">
               {activeSessions.length > 0 ? "Completed" : "Recent Directives"}
               {!isLoadingSessions && completedSessions.length > 0 && (
                 <span className="text-muted-foreground/40">({completedSessions.length})</span>
               )}
             </h2>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Search */}
+              <div className="relative">
+                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search tasks..."
+                  className="h-7 pl-7 font-mono text-[10px] rounded-none bg-background border-input w-[160px]"
+                />
+              </div>
               <Filter className="w-3 h-3 text-muted-foreground/50 shrink-0" />
               <Select value={filterLang} onValueChange={setFilterLang}>
                 <SelectTrigger className="font-mono text-[10px] h-7 rounded-none bg-background border-input w-[110px]">
@@ -588,14 +655,59 @@ export default function Dashboard() {
               </Select>
               {hasFilters && (
                 <button
-                  onClick={() => { setFilterLang("all"); setFilterStatus("all"); }}
+                  onClick={() => { setFilterLang("all"); setFilterStatus("all"); setSearchQuery(""); }}
                   className="font-mono text-[10px] text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <X className="w-3 h-3" />
                 </button>
               )}
+              {/* Bulk select toggle */}
+              <button
+                onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
+                className={`font-mono text-[10px] h-7 px-2 border transition-colors flex items-center gap-1 ${
+                  selectMode ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {selectMode ? <CheckSquare2 className="w-3 h-3" /> : <Square className="w-3 h-3" />}
+                SELECT
+              </button>
+              {/* CSV export */}
+              <a
+                href="/api/agent/stats/export"
+                download
+                className="font-mono text-[10px] h-7 px-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors flex items-center gap-1"
+              >
+                <FileDown className="w-3 h-3" />CSV
+              </a>
             </div>
           </div>
+
+          {/* Bulk action bar */}
+          {selectMode && selectedIds.size > 0 && (
+            <div className="flex items-center gap-2 mb-3 p-2 bg-primary/5 border border-primary/20 rounded-sm">
+              <span className="font-mono text-[10px] text-muted-foreground flex-1">
+                {selectedIds.size} selected
+              </span>
+              <button
+                onClick={handleBulkArchive}
+                className="font-mono text-[10px] px-2 py-1 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1"
+              >
+                <Archive className="w-3 h-3" />Archive
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="font-mono text-[10px] px-2 py-1 border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
+              >
+                <Trash2 className="w-3 h-3" />Delete
+              </button>
+              <button
+                onClick={() => setSelectedIds(new Set())}
+                className="font-mono text-[10px] text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
 
           <div className="grid gap-2">
             {isLoadingSessions &&
@@ -630,21 +742,107 @@ export default function Dashboard() {
             )}
 
             {completedSessions.map((session) => (
-              <Link key={session.id} href={`/sessions/${session.id}`}>
-                <div className="group relative border border-border bg-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors rounded-sm">
-                  {/* Status stripe */}
-                  <div
-                    className={`absolute left-0 top-0 bottom-0 w-0.5 rounded-l-sm ${
-                      session.status === "done"
-                        ? "bg-emerald-500"
-                        : session.status === "failed"
-                        ? "bg-red-500"
-                        : "bg-gray-500"
-                    }`}
-                  />
+              <div key={session.id} className="relative">
+                {selectMode && (
+                  <button
+                    onClick={(e) => toggleSelect(session.id, e)}
+                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10 text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    {selectedIds.has(session.id)
+                      ? <CheckSquare2 className="w-4 h-4 text-primary" />
+                      : <Square className="w-4 h-4" />}
+                  </button>
+                )}
+                <Link href={`/sessions/${session.id}`}>
+                  <div className={`group relative border border-border bg-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors rounded-sm ${selectMode ? "pl-10" : ""} ${selectedIds.has(session.id) ? "border-primary/30 bg-primary/5" : ""}`}>
+                    {/* Status stripe */}
+                    <div
+                      className={`absolute left-0 top-0 bottom-0 w-0.5 rounded-l-sm ${
+                        session.status === "done"
+                          ? "bg-emerald-500"
+                          : session.status === "failed"
+                          ? "bg-red-500"
+                          : "bg-gray-500"
+                      }`}
+                    />
 
-                  <div className="flex-1 min-w-0 pl-2">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <div className="flex-1 min-w-0 pl-2">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="font-mono text-xs text-muted-foreground shrink-0">
+                          ID_{session.id.toString().padStart(4, "0")}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={`font-mono text-[10px] rounded-none uppercase border shrink-0 ${getStatusStyle(session.status)}`}
+                        >
+                          {getStatusIcon(session.status)}
+                          {session.status}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={`font-mono text-[9px] rounded-none uppercase border shrink-0 ${getLangColor(session.language)}`}
+                        >
+                          {session.language}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className="font-mono text-[9px] rounded-none uppercase border shrink-0 text-muted-foreground/70 border-border"
+                        >
+                          <Cpu className="w-2 h-2 mr-0.5" />
+                          {session.model}
+                        </Badge>
+                      </div>
+                      <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
+                    </div>
+
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="text-right hidden sm:block">
+                        <div className="font-mono text-[10px] text-muted-foreground uppercase">Iterations</div>
+                        <div className="font-mono text-sm">{session.iterations}</div>
+                      </div>
+                      <div className="text-right hidden sm:block">
+                        <div className="font-mono text-[10px] text-muted-foreground uppercase">Completed</div>
+                        <div className="font-mono text-xs text-muted-foreground">{timeAgo(session.updatedAt)}</div>
+                      </div>
+                      {!selectMode && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8"
+                            onClick={(e) => handleArchive(session.id, true, e)}
+                            title="Archive"
+                          >
+                            <Archive className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8"
+                            onClick={(e) => handleDelete(session.id, e)}
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Link>
+              </div>
+            ))}
+          </div>
+          {/* Archived Sessions */}
+          {archivedSessions.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground/50 flex items-center gap-2 mb-3">
+                <Archive className="w-3 h-3" />
+                Archived ({archivedSessions.length})
+              </h3>
+              <div className="grid gap-2">
+                {archivedSessions.map((session) => (
+                  <div key={session.id} className="group border border-border/50 bg-card/50 p-3 flex items-center justify-between gap-3 rounded-sm opacity-60 hover:opacity-80 transition-opacity">
+                    <div className="flex items-center gap-3 min-w-0">
                       <span className="font-mono text-xs text-muted-foreground shrink-0">
                         ID_{session.id.toString().padStart(4, "0")}
                       </span>
@@ -655,51 +853,31 @@ export default function Dashboard() {
                         {getStatusIcon(session.status)}
                         {session.status}
                       </Badge>
-                      <Badge
-                        variant="outline"
-                        className={`font-mono text-[9px] rounded-none uppercase border shrink-0 ${getLangColor(session.language)}`}
+                      <p className="font-sans text-sm text-muted-foreground truncate">{session.task}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="font-mono text-[10px] h-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-400 transition-all"
+                        onClick={(e) => handleArchive(session.id, false, e)}
                       >
-                        {session.language}
-                      </Badge>
-                      <Badge
-                        variant="outline"
-                        className="font-mono text-[9px] rounded-none uppercase border shrink-0 text-muted-foreground/70 border-border"
+                        Restore
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="w-7 h-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
+                        onClick={(e) => handleDelete(session.id, e)}
                       >
-                        <Cpu className="w-2 h-2 mr-0.5" />
-                        {session.model}
-                      </Badge>
+                        <Trash2 className="w-3 h-3" />
+                      </Button>
                     </div>
-                    <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
                   </div>
-
-                  <div className="flex items-center gap-5 shrink-0">
-                    <div className="text-right hidden sm:block">
-                      <div className="font-mono text-[10px] text-muted-foreground uppercase">
-                        Iterations
-                      </div>
-                      <div className="font-mono text-sm">{session.iterations}</div>
-                    </div>
-                    <div className="text-right hidden sm:block">
-                      <div className="font-mono text-[10px] text-muted-foreground uppercase">
-                        Completed
-                      </div>
-                      <div className="font-mono text-xs text-muted-foreground">
-                        {timeAgo(session.updatedAt)}
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => handleDelete(session.id, e)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

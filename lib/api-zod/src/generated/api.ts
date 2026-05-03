@@ -34,6 +34,9 @@ export const ListSessionsResponseItem = zod.object({
     "cancelled",
   ]),
   iterations: zod.number(),
+  tokenUsage: zod.number(),
+  archived: zod.boolean(),
+  completedAt: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -71,6 +74,9 @@ export const GetSessionResponse = zod.object({
     "cancelled",
   ]),
   iterations: zod.number(),
+  tokenUsage: zod.number(),
+  archived: zod.boolean(),
+  completedAt: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
   files: zod.array(
@@ -123,6 +129,40 @@ export const DeleteSessionParams = zod.object({
 });
 
 /**
+ * @summary Archive or unarchive a session (soft-delete)
+ */
+export const ArchiveSessionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ArchiveSessionBody = zod.object({
+  archived: zod.boolean(),
+});
+
+export const ArchiveSessionResponse = zod.object({
+  id: zod.number(),
+  task: zod.string(),
+  language: zod.string(),
+  model: zod.string(),
+  status: zod.enum([
+    "pending",
+    "planning",
+    "coding",
+    "testing",
+    "iterating",
+    "done",
+    "failed",
+    "cancelled",
+  ]),
+  iterations: zod.number(),
+  tokenUsage: zod.number(),
+  archived: zod.boolean(),
+  completedAt: zod.string().nullish(),
+  createdAt: zod.string(),
+  updatedAt: zod.string(),
+});
+
+/**
  * @summary Re-run a completed or failed session
  */
 export const RerunSessionParams = zod.object({
@@ -145,6 +185,9 @@ export const RerunSessionResponse = zod.object({
     "cancelled",
   ]),
   iterations: zod.number(),
+  tokenUsage: zod.number(),
+  archived: zod.boolean(),
+  completedAt: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -194,6 +237,9 @@ export const CancelSessionResponse = zod.object({
     "cancelled",
   ]),
   iterations: zod.number(),
+  tokenUsage: zod.number(),
+  archived: zod.boolean(),
+  completedAt: zod.string().nullish(),
   createdAt: zod.string(),
   updatedAt: zod.string(),
 });
@@ -271,6 +317,8 @@ export const GetAgentStatsResponse = zod.object({
   successRate: zod.number(),
   avgIterations: zod.number(),
   totalFilesGenerated: zod.number(),
+  totalTokensUsed: zod.number(),
+  avgDurationSeconds: zod.number(),
 });
 
 /**
@@ -327,6 +375,9 @@ export const ExportSessionResponse = zod.object({
       "cancelled",
     ]),
     iterations: zod.number(),
+    tokenUsage: zod.number(),
+    archived: zod.boolean(),
+    completedAt: zod.string().nullish(),
     createdAt: zod.string(),
     updatedAt: zod.string(),
     files: zod.array(

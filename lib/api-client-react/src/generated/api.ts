@@ -20,6 +20,7 @@ import type {
   AgentEvent,
   AgentFile,
   AgentStats,
+  ArchiveSessionBody,
   Conversation,
   CreateConversationBody,
   CreateSessionBody,
@@ -453,6 +454,93 @@ export const useDeleteSession = <
   TContext
 > => {
   return useMutation(getDeleteSessionMutationOptions(options));
+};
+
+/**
+ * @summary Archive or unarchive a session (soft-delete)
+ */
+export const getArchiveSessionUrl = (id: number) => {
+  return `/api/agent/sessions/${id}/archive`;
+};
+
+export const archiveSession = async (
+  id: number,
+  archiveSessionBody: ArchiveSessionBody,
+  options?: RequestInit,
+): Promise<Session> => {
+  return customFetch<Session>(getArchiveSessionUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(archiveSessionBody),
+  });
+};
+
+export const getArchiveSessionMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof archiveSession>>,
+    TError,
+    { id: number; data: BodyType<ArchiveSessionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof archiveSession>>,
+  TError,
+  { id: number; data: BodyType<ArchiveSessionBody> },
+  TContext
+> => {
+  const mutationKey = ["archiveSession"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof archiveSession>>,
+    { id: number; data: BodyType<ArchiveSessionBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return archiveSession(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ArchiveSessionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof archiveSession>>
+>;
+export type ArchiveSessionMutationBody = BodyType<ArchiveSessionBody>;
+export type ArchiveSessionMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Archive or unarchive a session (soft-delete)
+ */
+export const useArchiveSession = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof archiveSession>>,
+    TError,
+    { id: number; data: BodyType<ArchiveSessionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof archiveSession>>,
+  TError,
+  { id: number; data: BodyType<ArchiveSessionBody> },
+  TContext
+> => {
+  return useMutation(getArchiveSessionMutationOptions(options));
 };
 
 /**
@@ -1039,6 +1127,79 @@ export function useGetAgentStats<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAgentStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export all sessions as CSV
+ */
+export const getExportStatsUrl = () => {
+  return `/api/agent/stats/export`;
+};
+
+export const exportStats = async (options?: RequestInit): Promise<string> => {
+  return customFetch<string>(getExportStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportStatsQueryKey = () => {
+  return [`/api/agent/stats/export`] as const;
+};
+
+export const getExportStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof exportStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getExportStatsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof exportStats>>> = ({
+    signal,
+  }) => exportStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportStats>>
+>;
+export type ExportStatsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Export all sessions as CSV
+ */
+
+export function useExportStats<
+  TData = Awaited<ReturnType<typeof exportStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof exportStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportStatsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

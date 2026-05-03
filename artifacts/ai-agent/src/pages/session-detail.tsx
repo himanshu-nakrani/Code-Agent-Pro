@@ -29,6 +29,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   ClipboardCheck,
+  Clock,
   Copy,
   Cpu,
   Download,
@@ -49,6 +50,7 @@ import {
   XCircle,
   ChevronDown,
   ChevronRight,
+  Coins,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
@@ -164,6 +166,17 @@ const STATUS_PHASES: Record<string, { label: string; color: string }> = {
   cancelled: { label: "CANCELLED", color: "text-gray-400" },
 };
 
+const EVENTS_PER_PAGE = 50;
+
+function formatElapsed(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  if (h > 0) return `${h}h ${m.toString().padStart(2,"0")}m ${s.toString().padStart(2,"0")}s`;
+  if (m > 0) return `${m}m ${s.toString().padStart(2,"0")}s`;
+  return `${s}s`;
+}
+
 export default function SessionDetail() {
   const [, params] = useRoute("/sessions/:id");
   const sessionId = params?.id ? parseInt(params.id, 10) : undefined;
@@ -180,6 +193,7 @@ export default function SessionDetail() {
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
   const [eventSearch, setEventSearch] = useState("");
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
+  const [eventPage, setEventPage] = useState(0);
   const [gitCommitMessage, setGitCommitMessage] = useState("");
   const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -191,6 +205,7 @@ export default function SessionDetail() {
   });
   const [tagInput, setTagInput] = useState("");
   const [showTagInput, setShowTagInput] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -228,6 +243,16 @@ export default function SessionDetail() {
     ? ["pending", "planning", "coding", "testing", "iterating"].includes(session.status)
     : false;
   const canRerun = !!session && !isActive && ["done", "failed", "cancelled"].includes(session.status);
+
+  // Live elapsed timer while session is running
+  useEffect(() => {
+    if (!session || !isActive) { setElapsedSeconds(0); return; }
+    const start = new Date(session.createdAt).getTime();
+    const tick = () => setElapsedSeconds(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [isActive, session?.createdAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: files = [] } = useListSessionFiles(sessionId!, {
     query: {
@@ -327,6 +352,23 @@ export default function SessionDetail() {
     });
   }, [events, eventSearch, eventTypeFilter]);
 
+  // Reset to last page when events are added live
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / EVENTS_PER_PAGE));
+  const effectiveEventPage = Math.min(eventPage, totalPages - 1);
+  const pagedEvents = filteredEvents.slice(
+    effectiveEventPage * EVENTS_PER_PAGE,
+    (effectiveEventPage + 1) * EVENTS_PER_PAGE
+  );
+
+  // Auto-scroll to last page when active
+  const prevFilteredLenRef = React.useRef(0);
+  useEffect(() => {
+    if (isActive && filteredEvents.length > prevFilteredLenRef.current) {
+      setEventPage(Math.max(0, Math.ceil(filteredEvents.length / EVENTS_PER_PAGE) - 1));
+    }
+    prevFilteredLenRef.current = filteredEvents.length;
+  }, [filteredEvents.length, isActive]);
+
   const eventsEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -416,9 +458,16 @@ export default function SessionDetail() {
             </Button>
           </Link>
           <div className="h-4 w-[1px] bg-border shrink-0" />
-          <div className="font-mono text-sm text-muted-foreground shrink-0">
+          <button
+            className="font-mono text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1 group shrink-0"
+            onClick={() => handleCopy(`ID_${session.id.toString().padStart(4, "0")}`, "session-id")}
+            title="Copy session ID"
+          >
             ID_{session.id.toString().padStart(4, "0")}
-          </div>
+            {copiedId === "session-id"
+              ? <ClipboardCheck className="w-3 h-3 text-emerald-400 ml-0.5" />
+              : <Copy className="w-3 h-3 ml-0.5 opacity-0 group-hover:opacity-60 transition-opacity" />}
+          </button>
 
           {/* Phase indicator */}
           <div className={`font-mono text-[10px] uppercase font-bold flex items-center gap-1 shrink-0 ${phaseInfo.color}`}>
@@ -429,6 +478,12 @@ export default function SessionDetail() {
           {isConnected && isActive && (
             <Badge variant="outline" className="font-mono text-[10px] rounded-none uppercase border-emerald-500/30 text-emerald-400 bg-emerald-500/10 shrink-0">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />LIVE
+            </Badge>
+          )}
+
+          {isActive && elapsedSeconds > 0 && (
+            <Badge variant="outline" className="font-mono text-[10px] rounded-none uppercase border-amber-500/30 text-amber-400 bg-amber-500/10 shrink-0 hidden sm:flex items-center gap-1">
+              <Clock className="w-2.5 h-2.5" />{formatElapsed(elapsedSeconds)}
             </Badge>
           )}
 
@@ -748,7 +803,7 @@ export default function SessionDetail() {
                 </div>
               )}
 
-              {filteredEvents.map((event) => (
+              {pagedEvents.map((event) => (
                 <div key={event.id} className="flex gap-3">
                   <div className="shrink-0 pt-1">
                     {event.type === "thought" && <div className="w-1.5 h-1.5 rounded-full bg-blue-400/60" />}
@@ -823,6 +878,29 @@ export default function SessionDetail() {
               <div ref={eventsEndRef} />
             </div>
           </ScrollArea>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="shrink-0 border-t border-border bg-card/40 px-3 h-9 flex items-center justify-between gap-2">
+              <button
+                onClick={() => setEventPage((p) => Math.max(0, p - 1))}
+                disabled={effectiveEventPage === 0}
+                className="font-mono text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 px-2 py-1 border border-border disabled:cursor-not-allowed"
+              >
+                ← PREV
+              </button>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {effectiveEventPage + 1} / {totalPages} · {filteredEvents.length} events
+              </span>
+              <button
+                onClick={() => setEventPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={effectiveEventPage >= totalPages - 1}
+                className="font-mono text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-30 px-2 py-1 border border-border disabled:cursor-not-allowed"
+              >
+                NEXT →
+              </button>
+            </div>
+          )}
         </div>
 
         {/* RIGHT: Telemetry / VCS / History */}
@@ -1181,8 +1259,22 @@ export default function SessionDetail() {
                       </div>
                     </div>
 
+                    {/* Token usage */}
+                    {(session.tokenUsage != null && session.tokenUsage > 0) && (
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono flex items-center gap-1">
+                          <Coins className="w-3 h-3" />
+                          Token Usage
+                        </div>
+                        <div className="bg-background border border-border rounded-sm p-2.5 font-mono">
+                          <div className="text-2xl font-bold text-amber-400">{session.tokenUsage.toLocaleString()}</div>
+                          <div className="text-[9px] text-muted-foreground mt-0.5">total tokens consumed</div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Thought history summary */}
-                    {events.filter(e => e.type === "thought").length > 0 && (
+                    {events.filter(e => e.type === "thought").length > 0 ? (
                       <div>
                         <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono flex items-center gap-1">
                           Thought Log
@@ -1199,6 +1291,12 @@ export default function SessionDetail() {
                           ))}
                         </div>
                       </div>
+                    ) : (
+                      !isActive && (
+                        <div className="text-center py-6 font-mono text-[10px] text-muted-foreground/50 border border-dashed border-border rounded-sm">
+                          NO_THOUGHT_LOG
+                        </div>
+                      )
                     )}
 
                   </div>
