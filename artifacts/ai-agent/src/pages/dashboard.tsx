@@ -12,7 +12,7 @@ import {
   getGetModelStatsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { format, formatDistanceToNowStrict, isValid } from "date-fns";
+import { formatDistanceToNowStrict, isValid } from "date-fns";
 import {
   Terminal,
   Activity,
@@ -34,9 +34,12 @@ import {
   Archive,
   CheckSquare2,
   Square,
+  Layers,
+  GitBranch,
+  TrendingUp,
+  TrendingDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -108,6 +111,29 @@ function timeAgo(date: string): string {
 const ACTIVE_STATUSES = ["pending", "planning", "coding", "testing", "iterating"];
 const TERMINAL_STATUSES = ["done", "failed", "cancelled"];
 
+const STATUS_CONFIG: Record<string, { dot: string; text: string; bar: string; label: string }> = {
+  done: { dot: "bg-emerald-500", text: "text-emerald-400", bar: "bg-emerald-500", label: "DONE" },
+  failed: { dot: "bg-red-500", text: "text-red-400", bar: "bg-red-500", label: "FAILED" },
+  cancelled: { dot: "bg-gray-500", text: "text-gray-400", bar: "bg-gray-500", label: "CANCELLED" },
+  pending: { dot: "bg-amber-400", text: "text-amber-400", bar: "bg-amber-400", label: "PENDING" },
+  planning: { dot: "bg-blue-400", text: "text-blue-400", bar: "bg-blue-400", label: "PLANNING" },
+  coding: { dot: "bg-blue-400", text: "text-blue-400", bar: "bg-blue-400", label: "CODING" },
+  testing: { dot: "bg-blue-400", text: "text-blue-400", bar: "bg-blue-400", label: "TESTING" },
+  iterating: { dot: "bg-blue-400", text: "text-blue-400", bar: "bg-blue-400", label: "ITERATING" },
+};
+
+const LANG_DOT: Record<string, string> = {
+  python: "bg-blue-400",
+  javascript: "bg-yellow-400",
+  typescript: "bg-sky-400",
+};
+
+const LANG_TEXT: Record<string, string> = {
+  python: "text-blue-400",
+  javascript: "text-yellow-400",
+  typescript: "text-sky-400",
+};
+
 export default function Dashboard() {
   const [, setLocation] = useLocation();
   const {
@@ -149,7 +175,6 @@ export default function Dashboard() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
-  // Cmd+K / Ctrl+K shortcut to open new session dialog
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
@@ -227,50 +252,6 @@ export default function Dashboard() {
     setNewLang(t.language);
   };
 
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case "done":
-        return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
-      case "failed":
-        return "bg-red-500/20 text-red-400 border-red-500/30";
-      case "cancelled":
-        return "bg-gray-500/20 text-gray-400 border-gray-500/30";
-      case "pending":
-        return "bg-amber-500/20 text-amber-400 border-amber-500/30";
-      default:
-        return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "done":
-        return <Check className="w-3 h-3 mr-1" />;
-      case "failed":
-        return <X className="w-3 h-3 mr-1" />;
-      case "cancelled":
-        return <X className="w-3 h-3 mr-1" />;
-      case "pending":
-        return <Clock className="w-3 h-3 mr-1" />;
-      default:
-        return <Activity className="w-3 h-3 mr-1 animate-pulse" />;
-    }
-  };
-
-  const getLangColor = (lang: string) => {
-    switch (lang) {
-      case "python":
-        return "text-blue-400 border-blue-500/30 bg-blue-500/10";
-      case "javascript":
-        return "text-yellow-400 border-yellow-500/30 bg-yellow-500/10";
-      case "typescript":
-        return "text-sky-400 border-sky-500/30 bg-sky-500/10";
-      default:
-        return "text-muted-foreground";
-    }
-  };
-
-  // Sorted newest-first, with language + status + search filters applied to completed
   const sortedSessions = [...(sessions ?? [])].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
@@ -289,27 +270,70 @@ export default function Dashboard() {
   const archivedSessions = sortedSessions.filter((s) => s.archived);
   const hasFilters = filterLang !== "all" || filterStatus !== "all" || !!searchQuery.trim();
 
+  const totalSessions = stats?.totalSessions ?? 0;
+  const successRate = stats?.successRate ?? 0;
+  const avgIter = stats?.avgIterations ?? 0;
+  const filesGenerated = stats?.totalFilesGenerated ?? 0;
+  const doneSessions = Math.round((successRate / 100) * totalSessions);
+
+  // Scorecard definitions
+  const SCORECARDS = [
+    {
+      label: "Total Sessions",
+      value: isLoadingStats ? null : totalSessions.toString(),
+      sub: activeSessions.length > 0 ? `${activeSessions.length} running now` : "all time",
+      trend: totalSessions > 0 ? "up" : "neutral",
+      icon: <Layers className="w-5 h-5" />,
+      accent: "text-orange-400",
+      gradientFrom: "from-orange-500/10",
+    },
+    {
+      label: "Success Rate",
+      value: isLoadingStats ? null : `${successRate.toFixed(1)}%`,
+      sub: totalSessions > 0 ? `${doneSessions} of ${totalSessions} passed` : "no sessions yet",
+      trend: successRate >= 50 ? "up" : successRate > 0 ? "down" : "neutral",
+      icon: <Activity className="w-5 h-5" />,
+      accent: "text-emerald-400",
+      gradientFrom: "from-emerald-500/10",
+    },
+    {
+      label: "Avg Iterations",
+      value: isLoadingStats ? null : avgIter.toFixed(1),
+      sub: "per session",
+      trend: "neutral",
+      icon: <GitBranch className="w-5 h-5" />,
+      accent: "text-blue-400",
+      gradientFrom: "from-blue-500/10",
+    },
+    {
+      label: "Files Generated",
+      value: isLoadingStats ? null : filesGenerated.toString(),
+      sub: "across all sessions",
+      trend: filesGenerated > 0 ? "up" : "neutral",
+      icon: <FileCode className="w-5 h-5" />,
+      accent: "text-purple-400",
+      gradientFrom: "from-purple-500/10",
+    },
+  ] as const;
+
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col font-sans">
+    <div className="min-h-screen bg-background text-foreground flex flex-col font-mono">
       {/* Header */}
       <header className="border-b border-border bg-card sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 h-12 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-primary-foreground">
-              <Terminal className="w-5 h-5" />
+            <div className="w-7 h-7 bg-primary flex items-center justify-center shrink-0">
+              <Terminal className="w-4 h-4 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight font-mono">FORGE</h1>
-            <span className="text-xs text-muted-foreground font-mono hidden sm:block">
+            <span className="text-[13px] font-bold tracking-widest">FORGE</span>
+            <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wider hidden sm:block">
               AI Coding Agent
             </span>
             {activeSessions.length > 0 && (
-              <Badge
-                variant="outline"
-                className="font-mono text-[10px] rounded-none border-blue-500/30 text-blue-400 bg-blue-500/10 ml-1"
-              >
-                <Activity className="w-2.5 h-2.5 mr-1 animate-pulse" />
+              <span className="font-mono text-[10px] px-1.5 py-0.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 flex items-center gap-1">
+                <Activity className="w-2.5 h-2.5 animate-pulse" />
                 {activeSessions.length} RUNNING
-              </Badge>
+              </span>
             )}
           </div>
 
@@ -323,13 +347,13 @@ export default function Dashboard() {
               }}
             >
               <DialogTrigger asChild>
-                <Button variant="default" className="font-mono text-sm gap-2">
-                  <Plus className="w-4 h-4" />
-                  NEW SESSION
-                  <span className="hidden sm:inline font-mono text-[10px] opacity-50 border border-current/30 px-1 py-0.5 rounded-sm">⌘K</span>
-                </Button>
+                <button className="flex items-center gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground text-[11px] font-bold px-3 py-1.5 uppercase tracking-wider transition-colors">
+                  <Plus className="w-3.5 h-3.5" />
+                  New Session
+                  <span className="hidden sm:inline font-mono text-[9px] opacity-50 border border-current/30 px-1 py-0.5">⌘K</span>
+                </button>
               </DialogTrigger>
-              <DialogContent className="sm:max-w-[560px] border-border bg-card">
+              <DialogContent className="sm:max-w-[560px] border-border bg-card font-mono">
                 <DialogHeader>
                   <DialogTitle className="font-mono text-base uppercase flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-primary" />
@@ -337,7 +361,6 @@ export default function Dashboard() {
                   </DialogTitle>
                 </DialogHeader>
                 <div className="flex flex-col gap-4 py-2">
-                  {/* Templates */}
                   <div>
                     <Label className="font-mono text-xs text-muted-foreground uppercase mb-2 block">
                       Quick Templates
@@ -359,15 +382,9 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </div>
-
                   <div className="h-[1px] bg-border" />
-
-                  {/* Custom task */}
                   <div className="flex flex-col gap-2">
-                    <Label
-                      htmlFor="task"
-                      className="font-mono text-xs text-muted-foreground uppercase"
-                    >
+                    <Label htmlFor="task" className="font-mono text-xs text-muted-foreground uppercase">
                       Task Directive
                     </Label>
                     <textarea
@@ -380,24 +397,16 @@ export default function Dashboard() {
                         if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleCreate();
                       }}
                     />
-                    <div className="text-[10px] text-muted-foreground/50 font-mono">
-                      Ctrl+Enter to submit
-                    </div>
+                    <div className="text-[10px] text-muted-foreground/50 font-mono">Ctrl+Enter to submit</div>
                   </div>
-
                   <div className="grid grid-cols-2 gap-3">
                     <div className="flex flex-col gap-2">
-                      <Label
-                        htmlFor="language"
-                        className="font-mono text-xs text-muted-foreground uppercase"
-                      >
+                      <Label htmlFor="language" className="font-mono text-xs text-muted-foreground uppercase">
                         Runtime
                       </Label>
                       <Select
                         value={newLang}
-                        onValueChange={(val: "python" | "javascript" | "typescript") =>
-                          setNewLang(val)
-                        }
+                        onValueChange={(val: "python" | "javascript" | "typescript") => setNewLang(val)}
                       >
                         <SelectTrigger className="font-mono bg-background border-input rounded-none">
                           <SelectValue placeholder="Select runtime" />
@@ -409,20 +418,13 @@ export default function Dashboard() {
                         </SelectContent>
                       </Select>
                     </div>
-
                     <div className="flex flex-col gap-2">
-                      <Label
-                        htmlFor="model"
-                        className="font-mono text-xs text-muted-foreground uppercase flex items-center gap-1"
-                      >
-                        <Cpu className="w-3 h-3" />
-                        AI Model
+                      <Label htmlFor="model" className="font-mono text-xs text-muted-foreground uppercase flex items-center gap-1">
+                        <Cpu className="w-3 h-3" />AI Model
                       </Label>
                       <Select
                         value={newModel}
-                        onValueChange={(val: "gpt-4.1" | "gpt-4o" | "gpt-4o-mini") =>
-                          setNewModel(val)
-                        }
+                        onValueChange={(val: "gpt-4.1" | "gpt-4o" | "gpt-4o-mini") => setNewModel(val)}
                       >
                         <SelectTrigger className="font-mono bg-background border-input rounded-none">
                           <SelectValue placeholder="Select model" />
@@ -443,15 +445,9 @@ export default function Dashboard() {
                     className="font-mono w-full gap-2"
                   >
                     {createSession.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        LAUNCHING AGENT...
-                      </>
+                      <><Loader2 className="w-4 h-4 animate-spin" />LAUNCHING AGENT...</>
                     ) : (
-                      <>
-                        <Zap className="w-4 h-4" />
-                        EXECUTE DIRECTIVE
-                      </>
+                      <><Zap className="w-4 h-4" />EXECUTE DIRECTIVE</>
                     )}
                   </Button>
                 </DialogFooter>
@@ -461,178 +457,187 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8 flex flex-col gap-8">
-        {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            {
-              label: "Total Sessions",
-              icon: Activity,
-              value: stats?.totalSessions ?? 0,
-              format: (v: number) => v.toString(),
-            },
-            {
-              label: "Success Rate",
-              icon: Check,
-              value: stats?.successRate ?? 0,
-              format: (v: number) => `${v.toFixed(1)}%`,
-            },
-            {
-              label: "Avg Iterations",
-              icon: Play,
-              value: stats?.avgIterations ?? 0,
-              format: (v: number) => v.toFixed(1),
-            },
-            {
-              label: "Files Generated",
-              icon: FileCode,
-              value: stats?.totalFilesGenerated ?? 0,
-              format: (v: number) => v.toString(),
-            },
-          ].map(({ label, icon: Icon, value, format: fmt }) => (
-            <Card key={label} className="bg-card border-border rounded-sm shadow-none">
-              <CardHeader className="pb-2 pt-4 px-4">
-                <CardTitle className="text-[10px] font-mono text-muted-foreground uppercase flex items-center gap-2">
-                  <Icon className="w-3 h-3" />
-                  {label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4">
-                {isLoadingStats ? (
-                  <Skeleton className="h-8 w-16 bg-muted" />
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-5 flex flex-col gap-5">
+        {/* Scorecard Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {SCORECARDS.map((card) => (
+            <div
+              key={card.label}
+              className={`relative bg-card border border-border p-5 overflow-hidden group hover:border-border/80 transition-colors`}
+            >
+              <div className={`absolute inset-0 bg-gradient-to-br ${card.gradientFrom} to-transparent opacity-60`} />
+              <div className="relative">
+                <div className="flex items-start justify-between mb-3">
+                  <span className={card.accent}>{card.icon}</span>
+                  {card.trend === "up" && <TrendingUp className="w-3.5 h-3.5 text-emerald-500/60" />}
+                  {card.trend === "down" && <TrendingDown className="w-3.5 h-3.5 text-red-500/60" />}
+                </div>
+                {card.value === null ? (
+                  <Skeleton className="h-9 w-20 bg-muted mb-1" />
                 ) : (
-                  <div className="text-3xl font-mono font-bold text-primary">{fmt(value)}</div>
+                  <div className={`text-3xl font-bold tracking-tight mb-0.5 ${card.accent}`}>
+                    {card.value}
+                  </div>
                 )}
-              </CardContent>
-            </Card>
+                <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5">
+                  {card.label}
+                </div>
+                <div className="text-[10px] text-muted-foreground/40">{card.sub}</div>
+              </div>
+            </div>
           ))}
         </div>
 
-        {/* Model Performance Stats */}
+        {/* Model Performance Band */}
         {(isLoadingModelStats || modelStats.length > 0) && (
-          <div>
-            <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground flex items-center gap-2">
-              <Cpu className="w-3 h-3" />
-              Model Performance
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {isLoadingModelStats
-                ? Array.from({ length: 3 }).map((_, i) => (
-                    <Skeleton key={i} className="h-24 w-full bg-card rounded-none" />
-                  ))
-                : modelStats.map((m) => (
-                    <div key={m.model} className="border border-border bg-card p-4 rounded-sm">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <Cpu className="w-3 h-3 text-primary shrink-0" />
-                          <span className="font-mono text-xs font-bold text-foreground">{m.model}</span>
+          <div className="border border-border bg-card">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Cpu className="w-3.5 h-3.5 text-primary" />
+                <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+                  Model Performance
+                </span>
+              </div>
+              {!isLoadingModelStats && (
+                <span className="text-[9px] text-muted-foreground/40">
+                  {modelStats.reduce((a, m) => a + m.totalSessions, 0)} total runs
+                </span>
+              )}
+            </div>
+            {isLoadingModelStats ? (
+              <div className="px-4 py-3">
+                <Skeleton className="h-8 w-full bg-muted" />
+              </div>
+            ) : (
+              <div className="divide-y divide-border/50">
+                {modelStats.map((m) => (
+                  <div key={m.model} className="px-4 py-3 flex items-center gap-6 flex-wrap">
+                    <div className="flex items-center gap-2 w-28 shrink-0">
+                      <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                      <span className="text-[11px] text-foreground/70 font-mono">{m.model}</span>
+                    </div>
+                    <div className="flex items-center gap-5">
+                      <div>
+                        <div className="text-base font-bold text-emerald-400">
+                          {m.successRate.toFixed(0)}%
                         </div>
-                        <Badge variant="outline" className="font-mono text-[9px] rounded-none border-border text-muted-foreground">
-                          {m.totalSessions} runs
-                        </Badge>
+                        <div className="text-[9px] text-muted-foreground/40 uppercase tracking-wider">
+                          Success
+                        </div>
                       </div>
-                      <div className="grid grid-cols-3 gap-2 font-mono text-[10px]">
-                        <div className="text-center">
-                          <div className="text-emerald-400 font-bold text-base">{m.successRate.toFixed(0)}%</div>
-                          <div className="text-muted-foreground">success</div>
+                      <div>
+                        <div className="text-base font-bold text-blue-400">
+                          {m.avgIterations.toFixed(1)}
                         </div>
-                        <div className="text-center">
-                          <div className="text-sky-400 font-bold text-base">{m.avgIterations.toFixed(1)}</div>
-                          <div className="text-muted-foreground">avg iter</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-red-400 font-bold text-base">{m.failedSessions}</div>
-                          <div className="text-muted-foreground">failed</div>
+                        <div className="text-[9px] text-muted-foreground/40 uppercase tracking-wider">
+                          Avg Iter
                         </div>
                       </div>
-                      <div className="mt-3 w-full h-1 bg-muted rounded-full overflow-hidden">
+                      <div>
+                        <div className="text-base font-bold text-red-400">{m.failedSessions}</div>
+                        <div className="text-[9px] text-muted-foreground/40 uppercase tracking-wider">
+                          Failed
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-32 max-w-52">
+                      <div className="flex justify-between text-[9px] text-muted-foreground/40 mb-1">
+                        <span>pass rate</span>
+                        <span>{m.successRate.toFixed(0)}%</span>
+                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full transition-all"
+                          className="h-full bg-gradient-to-r from-primary to-emerald-500 rounded-full transition-all"
                           style={{ width: `${Math.min(m.successRate, 100)}%` }}
                         />
                       </div>
                     </div>
-                  ))}
-            </div>
+                    <span className="text-[9px] text-muted-foreground/30 ml-auto">
+                      {m.totalSessions} runs
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {/* Active Sessions */}
         {activeSessions.length > 0 && (
-          <div>
-            <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground flex items-center gap-2">
-              <Activity className="w-3 h-3 animate-pulse text-blue-400" />
-              Running ({activeSessions.length})
-            </h2>
-            <div className="grid gap-2">
-              {activeSessions.map((session) => (
-                <Link key={session.id} href={`/sessions/${session.id}`}>
-                  <div className="group border border-blue-500/20 bg-blue-500/5 p-4 flex items-center justify-between gap-4 cursor-pointer hover:border-blue-500/40 hover:bg-blue-500/10 transition-colors rounded-sm">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center shrink-0">
-                        <Activity className="w-3 h-3 text-blue-400 animate-pulse" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-mono text-xs text-muted-foreground">
-                            ID_{session.id.toString().padStart(4, "0")}
-                          </span>
-                          <Badge
-                            variant="outline"
-                            className={`font-mono text-[10px] rounded-none uppercase border ${getStatusStyle(session.status)}`}
-                          >
-                            {getStatusIcon(session.status)}
-                            {session.status}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={`font-mono text-[9px] rounded-none uppercase border ${getLangColor(session.language)}`}
-                          >
-                            {session.language}
-                          </Badge>
+          <div className="border border-blue-500/20 bg-blue-500/5">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-blue-500/10">
+              <Activity className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+              <span className="text-[10px] uppercase tracking-widest text-blue-400/70 font-bold">
+                Running ({activeSessions.length})
+              </span>
+            </div>
+            <div className="divide-y divide-blue-500/10">
+              {activeSessions.map((session) => {
+                const cfg = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.pending;
+                return (
+                  <Link key={session.id} href={`/sessions/${session.id}`}>
+                    <div className="flex items-center gap-0 hover:bg-blue-500/5 cursor-pointer group transition-colors">
+                      <div className={`w-0.5 self-stretch ${cfg.bar} opacity-60`} />
+                      <div className="flex items-center gap-3 px-4 py-2.5 flex-1 min-w-0">
+                        <span className="text-[10px] text-muted-foreground/30 shrink-0 w-14">
+                          ID_{session.id.toString().padStart(4, "0")}
+                        </span>
+                        <div className={`flex items-center gap-1 shrink-0 ${cfg.text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${cfg.dot}`} />
+                          <span className="text-[10px] uppercase tracking-wider">{cfg.label}</span>
                         </div>
-                        <p className="font-sans text-sm text-foreground truncate max-w-[500px]">
+                        <span className={`text-[10px] shrink-0 ${LANG_TEXT[session.language] ?? "text-muted-foreground"}`}>
+                          {session.language}
+                        </span>
+                        <span className="text-[11px] text-foreground/60 truncate flex-1">
                           {session.task}
-                        </p>
+                        </span>
+                        <div className="flex items-center gap-3 shrink-0 ml-auto">
+                          <span className="text-[10px] text-muted-foreground/30">
+                            {session.iterations} iter
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/25">
+                            {timeAgo(session.createdAt)}
+                          </span>
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/25 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right text-[10px] font-mono text-muted-foreground hidden sm:block">
-                        <div>{timeAgo(session.createdAt)}</div>
-                        <div>iter {session.iterations}</div>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-muted-foreground/40" />
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Completed / All Sessions */}
-        <div>
-          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h2 className="text-xs font-mono font-bold uppercase text-muted-foreground flex items-center gap-2 shrink-0">
-              {activeSessions.length > 0 ? "Completed" : "Recent Directives"}
+        {/* Completed Sessions */}
+        <div className="border border-border">
+          {/* Toolbar */}
+          <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-card/50 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <Zap className="w-3.5 h-3.5 text-primary" />
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-bold">
+                {activeSessions.length > 0 ? "Completed" : "Recent Directives"}
+              </span>
               {!isLoadingSessions && completedSessions.length > 0 && (
-                <span className="text-muted-foreground/40">({completedSessions.length})</span>
+                <span className="text-[10px] text-muted-foreground/30">
+                  ({completedSessions.length})
+                </span>
               )}
-            </h2>
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Search */}
-              <div className="relative">
-                <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground/50" />
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <div className="flex items-center gap-1 bg-background border border-input px-2 py-1">
+                <Search className="w-3 h-3 text-muted-foreground/40" />
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search tasks..."
-                  className="h-7 pl-7 font-mono text-[10px] rounded-none bg-background border-input w-[160px]"
+                  className="h-4 p-0 font-mono text-[10px] border-0 bg-transparent focus-visible:ring-0 w-[130px] rounded-none"
                 />
               </div>
-              <Filter className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+              <Filter className="w-3 h-3 text-muted-foreground/30 shrink-0" />
               <Select value={filterLang} onValueChange={setFilterLang}>
-                <SelectTrigger className="font-mono text-[10px] h-7 rounded-none bg-background border-input w-[110px]">
+                <SelectTrigger className="font-mono text-[10px] h-6 rounded-none bg-background border-input w-[100px] px-2">
                   <SelectValue placeholder="Language" />
                 </SelectTrigger>
                 <SelectContent>
@@ -643,7 +648,7 @@ export default function Dashboard() {
                 </SelectContent>
               </Select>
               <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="font-mono text-[10px] h-7 rounded-none bg-background border-input w-[100px]">
+                <SelectTrigger className="font-mono text-[10px] h-6 rounded-none bg-background border-input w-[90px] px-2">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
@@ -661,21 +666,19 @@ export default function Dashboard() {
                   <X className="w-3 h-3" />
                 </button>
               )}
-              {/* Bulk select toggle */}
               <button
                 onClick={() => { setSelectMode((v) => !v); setSelectedIds(new Set()); }}
-                className={`font-mono text-[10px] h-7 px-2 border transition-colors flex items-center gap-1 ${
+                className={`font-mono text-[10px] h-6 px-2 border transition-colors flex items-center gap-1 ${
                   selectMode ? "border-primary text-primary bg-primary/10" : "border-border text-muted-foreground hover:text-foreground"
                 }`}
               >
                 {selectMode ? <CheckSquare2 className="w-3 h-3" /> : <Square className="w-3 h-3" />}
                 SELECT
               </button>
-              {/* CSV export */}
               <a
                 href="/api/agent/stats/export"
                 download
-                className="font-mono text-[10px] h-7 px-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors flex items-center gap-1"
+                className="font-mono text-[10px] h-6 px-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors flex items-center gap-1"
               >
                 <FileDown className="w-3 h-3" />CSV
               </a>
@@ -684,19 +687,19 @@ export default function Dashboard() {
 
           {/* Bulk action bar */}
           {selectMode && selectedIds.size > 0 && (
-            <div className="flex items-center gap-2 mb-3 p-2 bg-primary/5 border border-primary/20 rounded-sm">
+            <div className="flex items-center gap-2 px-4 py-2 bg-primary/5 border-b border-primary/20">
               <span className="font-mono text-[10px] text-muted-foreground flex-1">
                 {selectedIds.size} selected
               </span>
               <button
                 onClick={handleBulkArchive}
-                className="font-mono text-[10px] px-2 py-1 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1"
+                className="font-mono text-[10px] px-2 py-0.5 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-colors flex items-center gap-1"
               >
                 <Archive className="w-3 h-3" />Archive
               </button>
               <button
                 onClick={handleBulkDelete}
-                className="font-mono text-[10px] px-2 py-1 border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
+                className="font-mono text-[10px] px-2 py-0.5 border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-1"
               >
                 <Trash2 className="w-3 h-3" />Delete
               </button>
@@ -709,17 +712,24 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div className="grid gap-2">
+          {/* Session rows */}
+          <div className="divide-y divide-border/60">
             {isLoadingSessions &&
-              Array.from({ length: 3 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 w-full bg-card rounded-none" />
+              Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                  <Skeleton className="h-3 w-12 bg-muted" />
+                  <Skeleton className="h-3 w-16 bg-muted" />
+                  <Skeleton className="h-3 w-20 bg-muted" />
+                  <Skeleton className="h-3 flex-1 bg-muted" />
+                  <Skeleton className="h-3 w-10 bg-muted" />
+                </div>
               ))}
 
             {!isLoadingSessions && sortedSessions.length === 0 && (
-              <div className="border border-dashed border-border p-16 text-center rounded-sm">
+              <div className="px-4 py-16 text-center">
                 <div className="flex flex-col items-center gap-4">
-                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                    <Terminal className="w-7 h-7 text-primary" />
+                  <div className="w-12 h-12 bg-primary/10 flex items-center justify-center">
+                    <Terminal className="w-6 h-6 text-primary" />
                   </div>
                   <div>
                     <div className="font-mono text-sm font-bold text-foreground mb-1">
@@ -741,144 +751,130 @@ export default function Dashboard() {
               </div>
             )}
 
-            {completedSessions.map((session) => (
-              <div key={session.id} className="relative">
-                {selectMode && (
-                  <button
-                    onClick={(e) => toggleSelect(session.id, e)}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 z-10 text-muted-foreground hover:text-primary transition-colors"
-                  >
-                    {selectedIds.has(session.id)
-                      ? <CheckSquare2 className="w-4 h-4 text-primary" />
-                      : <Square className="w-4 h-4" />}
-                  </button>
-                )}
-                <Link href={`/sessions/${session.id}`}>
-                  <div className={`group relative border border-border bg-card p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 cursor-pointer hover:border-primary/40 hover:bg-primary/5 transition-colors rounded-sm ${selectMode ? "pl-10" : ""} ${selectedIds.has(session.id) ? "border-primary/30 bg-primary/5" : ""}`}>
-                    {/* Status stripe */}
+            {completedSessions.map((session, idx) => {
+              const cfg = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.failed;
+              return (
+                <div key={session.id} className="relative flex items-center gap-0">
+                  {selectMode && (
+                    <button
+                      onClick={(e) => toggleSelect(session.id, e)}
+                      className="absolute left-4 top-1/2 -translate-y-1/2 z-10 text-muted-foreground hover:text-primary transition-colors"
+                    >
+                      {selectedIds.has(session.id)
+                        ? <CheckSquare2 className="w-3.5 h-3.5 text-primary" />
+                        : <Square className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
+                  <Link href={`/sessions/${session.id}`} className="flex-1 min-w-0">
                     <div
-                      className={`absolute left-0 top-0 bottom-0 w-0.5 rounded-l-sm ${
-                        session.status === "done"
-                          ? "bg-emerald-500"
-                          : session.status === "failed"
-                          ? "bg-red-500"
-                          : "bg-gray-500"
+                      className={`flex items-center gap-0 hover:bg-muted/30 cursor-pointer group transition-colors ${
+                        selectedIds.has(session.id) ? "bg-primary/5" : ""
                       }`}
-                    />
-
-                    <div className="flex-1 min-w-0 pl-2">
-                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                        <span className="font-mono text-xs text-muted-foreground shrink-0">
+                    >
+                      <div className={`w-0.5 self-stretch ${cfg.bar} opacity-60`} />
+                      <div className={`flex items-center gap-3 px-4 py-2.5 flex-1 min-w-0 ${selectMode ? "pl-10" : ""}`}>
+                        <span className="text-[10px] text-muted-foreground/25 shrink-0 w-14">
                           ID_{session.id.toString().padStart(4, "0")}
                         </span>
-                        <Badge
-                          variant="outline"
-                          className={`font-mono text-[10px] rounded-none uppercase border shrink-0 ${getStatusStyle(session.status)}`}
-                        >
-                          {getStatusIcon(session.status)}
-                          {session.status}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className={`font-mono text-[9px] rounded-none uppercase border shrink-0 ${getLangColor(session.language)}`}
-                        >
-                          {session.language}
-                        </Badge>
-                        <Badge
-                          variant="outline"
-                          className="font-mono text-[9px] rounded-none uppercase border shrink-0 text-muted-foreground/70 border-border"
-                        >
-                          <Cpu className="w-2 h-2 mr-0.5" />
-                          {session.model}
-                        </Badge>
+                        <div className={`flex items-center gap-1 shrink-0 w-20 ${cfg.text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${cfg.dot}`} />
+                          <span className="text-[10px] uppercase tracking-wider">{cfg.label}</span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 w-24">
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${LANG_DOT[session.language] ?? "bg-muted-foreground"}`} />
+                          <span className={`text-[10px] ${LANG_TEXT[session.language] ?? "text-muted-foreground"}`}>
+                            {session.language}
+                          </span>
+                        </div>
+                        <span className="text-[11px] text-foreground/55 truncate flex-1">
+                          {session.task}
+                        </span>
+                        <div className="flex items-center gap-4 shrink-0 ml-auto">
+                          <span className="text-[10px] text-muted-foreground/30 hidden sm:block">
+                            {session.iterations} iter
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/25 hidden sm:block">
+                            {timeAgo(session.updatedAt)}
+                          </span>
+                          {!selectMode && (
+                            <>
+                              <button
+                                onClick={(e) => handleArchive(session.id, true, e)}
+                                className="text-muted-foreground/20 hover:text-amber-400 opacity-0 group-hover:opacity-100 transition-all"
+                                title="Archive"
+                              >
+                                <Archive className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={(e) => handleDelete(session.id, e)}
+                                className="text-muted-foreground/20 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                                title="Delete"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/20 opacity-0 group-hover:opacity-60 transition-opacity" />
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <p className="font-sans text-sm text-foreground truncate">{session.task}</p>
                     </div>
-
-                    <div className="flex items-center gap-3 shrink-0">
-                      <div className="text-right hidden sm:block">
-                        <div className="font-mono text-[10px] text-muted-foreground uppercase">Iterations</div>
-                        <div className="font-mono text-sm">{session.iterations}</div>
-                      </div>
-                      <div className="text-right hidden sm:block">
-                        <div className="font-mono text-[10px] text-muted-foreground uppercase">Completed</div>
-                        <div className="font-mono text-xs text-muted-foreground">{timeAgo(session.updatedAt)}</div>
-                      </div>
-                      {!selectMode && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-amber-400 hover:bg-amber-500/10 opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8"
-                            onClick={(e) => handleArchive(session.id, true, e)}
-                            title="Archive"
-                          >
-                            <Archive className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity w-8 h-8"
-                            onClick={(e) => handleDelete(session.id, e)}
-                            title="Delete"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </Link>
-              </div>
-            ))}
+                  </Link>
+                </div>
+              );
+            })}
           </div>
-          {/* Archived Sessions */}
-          {archivedSessions.length > 0 && (
-            <div className="mt-6">
-              <h3 className="text-xs font-mono font-bold uppercase text-muted-foreground/50 flex items-center gap-2 mb-3">
-                <Archive className="w-3 h-3" />
+        </div>
+
+        {/* Archived Sessions */}
+        {archivedSessions.length > 0 && (
+          <div className="border border-border/50">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50">
+              <Archive className="w-3 h-3 text-muted-foreground/30" />
+              <span className="text-[9px] uppercase tracking-widest text-muted-foreground/30 font-bold">
                 Archived ({archivedSessions.length})
-              </h3>
-              <div className="grid gap-2">
-                {archivedSessions.map((session) => (
-                  <div key={session.id} className="group border border-border/50 bg-card/50 p-3 flex items-center justify-between gap-3 rounded-sm opacity-60 hover:opacity-80 transition-opacity">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="font-mono text-xs text-muted-foreground shrink-0">
+              </span>
+            </div>
+            <div className="divide-y divide-border/30">
+              {archivedSessions.map((session) => {
+                const cfg = STATUS_CONFIG[session.status] ?? STATUS_CONFIG.failed;
+                return (
+                  <div
+                    key={session.id}
+                    className="group flex items-center gap-0 opacity-50 hover:opacity-70 transition-opacity"
+                  >
+                    <div className={`w-0.5 self-stretch ${cfg.bar} opacity-40`} />
+                    <div className="flex items-center gap-3 px-4 py-2 flex-1 min-w-0">
+                      <span className="text-[10px] text-muted-foreground/30 shrink-0 w-14">
                         ID_{session.id.toString().padStart(4, "0")}
                       </span>
-                      <Badge
-                        variant="outline"
-                        className={`font-mono text-[10px] rounded-none uppercase border shrink-0 ${getStatusStyle(session.status)}`}
-                      >
-                        {getStatusIcon(session.status)}
-                        {session.status}
-                      </Badge>
-                      <p className="font-sans text-sm text-muted-foreground truncate">{session.task}</p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="font-mono text-[10px] h-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-400 transition-all"
-                        onClick={(e) => handleArchive(session.id, false, e)}
-                      >
-                        Restore
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="w-7 h-7 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all"
-                        onClick={(e) => handleDelete(session.id, e)}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
+                      <div className={`flex items-center gap-1 shrink-0 w-20 ${cfg.text}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                        <span className="text-[10px] uppercase tracking-wider">{cfg.label}</span>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground/40 truncate flex-1">
+                        {session.task}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          onClick={(e) => handleArchive(session.id, false, e)}
+                          className="font-mono text-[10px] px-2 py-0.5 border border-border text-muted-foreground hover:text-amber-400 hover:border-amber-500/30 transition-colors"
+                        >
+                          Restore
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(session.id, e)}
+                          className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
     </div>
   );
