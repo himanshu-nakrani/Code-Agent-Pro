@@ -3,10 +3,12 @@ import { Link, useLocation } from "wouter";
 import {
   useListSessions,
   useGetAgentStats,
+  useGetModelStats,
   useCreateSession,
   useDeleteSession,
   getListSessionsQueryKey,
   getGetAgentStatsQueryKey,
+  getGetModelStatsQueryKey,
 } from "@workspace/api-client-react";
 import { format, formatDistanceToNowStrict, isValid } from "date-fns";
 import {
@@ -120,6 +122,9 @@ export default function Dashboard() {
   });
   const { data: stats, isLoading: isLoadingStats } = useGetAgentStats({
     query: { queryKey: getGetAgentStatsQueryKey(), refetchInterval: 10000 },
+  });
+  const { data: modelStats = [], isLoading: isLoadingModelStats } = useGetModelStats({
+    query: { queryKey: getGetModelStatsQueryKey(), refetchInterval: 15000 },
   });
 
   const createSession = useCreateSession();
@@ -445,6 +450,55 @@ export default function Dashboard() {
             </Card>
           ))}
         </div>
+
+        {/* Model Performance Stats */}
+        {(isLoadingModelStats || modelStats.length > 0) && (
+          <div>
+            <h2 className="text-xs font-mono font-bold uppercase mb-3 text-muted-foreground flex items-center gap-2">
+              <Cpu className="w-3 h-3" />
+              Model Performance
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {isLoadingModelStats
+                ? Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-24 w-full bg-card rounded-none" />
+                  ))
+                : modelStats.map((m) => (
+                    <div key={m.model} className="border border-border bg-card p-4 rounded-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Cpu className="w-3 h-3 text-primary shrink-0" />
+                          <span className="font-mono text-xs font-bold text-foreground">{m.model}</span>
+                        </div>
+                        <Badge variant="outline" className="font-mono text-[9px] rounded-none border-border text-muted-foreground">
+                          {m.totalSessions} runs
+                        </Badge>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 font-mono text-[10px]">
+                        <div className="text-center">
+                          <div className="text-emerald-400 font-bold text-base">{m.successRate.toFixed(0)}%</div>
+                          <div className="text-muted-foreground">success</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-sky-400 font-bold text-base">{m.avgIterations.toFixed(1)}</div>
+                          <div className="text-muted-foreground">avg iter</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-red-400 font-bold text-base">{m.failedSessions}</div>
+                          <div className="text-muted-foreground">failed</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 w-full h-1 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-500 to-blue-500 rounded-full transition-all"
+                          style={{ width: `${Math.min(m.successRate, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+            </div>
+          </div>
+        )}
 
         {/* Active Sessions */}
         {activeSessions.length > 0 && (

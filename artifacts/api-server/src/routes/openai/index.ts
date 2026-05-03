@@ -8,7 +8,6 @@ import {
   SendMessageBody,
 } from "@workspace/api-zod";
 import { openai } from "@workspace/integrations-openai-ai-server";
-import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
 
@@ -27,7 +26,6 @@ router.post("/openai/conversations", async (req, res): Promise<void> => {
   }
 
   const [conv] = await db.insert(conversations).values({
-    id: randomUUID(),
     title: parsed.data.title,
   }).returning();
 
@@ -42,8 +40,14 @@ router.get("/openai/conversations/:id/messages", async (req, res): Promise<void>
     return;
   }
 
+  const convId = parseInt(params.data.id, 10);
+  if (isNaN(convId)) {
+    res.status(400).json({ error: "Invalid conversation ID" });
+    return;
+  }
+
   const msgs = await db.select().from(messages)
-    .where(eq(messages.conversationId, params.data.id))
+    .where(eq(messages.conversationId, convId))
     .orderBy(messages.createdAt);
 
   res.json(msgs);
@@ -63,13 +67,18 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
     return;
   }
 
+  const convId = parseInt(params.data.id, 10);
+  if (isNaN(convId)) {
+    res.status(400).json({ error: "Invalid conversation ID" });
+    return;
+  }
+
   const history = await db.select().from(messages)
-    .where(eq(messages.conversationId, params.data.id))
+    .where(eq(messages.conversationId, convId))
     .orderBy(messages.createdAt);
 
   await db.insert(messages).values({
-    id: randomUUID(),
-    conversationId: params.data.id,
+    conversationId: convId,
     role: "user",
     content: body.data.content,
   });
@@ -87,7 +96,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   let fullResponse = "";
 
   const stream = await openai.chat.completions.create({
-    model: "gpt-5.4",
+    model: "gpt-4.1",
     max_completion_tokens: 8192,
     messages: chatMessages,
     stream: true,
@@ -102,8 +111,7 @@ router.post("/openai/conversations/:id/messages", async (req, res): Promise<void
   }
 
   await db.insert(messages).values({
-    id: randomUUID(),
-    conversationId: params.data.id,
+    conversationId: convId,
     role: "assistant",
     content: fullResponse,
   });

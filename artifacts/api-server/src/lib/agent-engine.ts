@@ -413,9 +413,9 @@ async function validateGeneratedFiles(workspacePath: string, files: { name: stri
     // Python-specific checks
     if (file.name.endsWith(".py")) {
       // Check for inconsistent indentation
-      const lines = file.content.split("\n");
+      const pyLines = file.content.split("\n");
       const indentations = new Set<number>();
-      for (const line of lines) {
+      for (const line of pyLines) {
         if (line.trim()) {
           const match = line.match(/^( +)/);
           if (match) indentations.add(match[1].length);

@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Link, useRoute } from "wouter";
 import {
   useCancelSession,
@@ -31,14 +33,17 @@ import {
   Cpu,
   Download,
   FileCode,
+  FileJson,
   GitBranch,
   GitCommit as GitCommitIcon,
+  Layers,
   Loader2,
   Pencil,
   RefreshCw,
   Save,
   Search,
   Square,
+  Tag,
   Terminal,
   X as XIcon,
   XCircle,
@@ -178,6 +183,28 @@ export default function SessionDetail() {
   const [gitCommitMessage, setGitCommitMessage] = useState("");
   const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set());
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [mobilePanelView, setMobilePanelView] = useState<"workspace" | "stream" | "telemetry">("stream");
+  const [tags, setTags] = useState<string[]>(() => {
+    if (!sessionId) return [];
+    try { return JSON.parse(localStorage.getItem(`forge-tags-${sessionId}`) || "[]"); }
+    catch { return []; }
+  });
+  const [tagInput, setTagInput] = useState("");
+  const [showTagInput, setShowTagInput] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    localStorage.setItem(`forge-tags-${sessionId}`, JSON.stringify(tags));
+  }, [tags, sessionId]);
+
+  const addTag = (t: string) => {
+    const trimmed = t.trim().toLowerCase();
+    if (trimmed && !tags.includes(trimmed)) setTags((prev) => [...prev, trimmed]);
+    setTagInput("");
+    setShowTagInput(false);
+  };
+
+  const removeTag = (t: string) => setTags((prev) => prev.filter((x) => x !== t));
 
   const handleCopy = useCallback((text: string, id: string) => {
     navigator.clipboard.writeText(text).then(() => {
@@ -429,6 +456,14 @@ export default function SessionDetail() {
               />
             </div>
           </div>
+          <button
+            onClick={() => setShowTagInput(true)}
+            className="font-mono text-[10px] h-8 px-2 border border-border hover:border-primary/40 hover:text-primary text-muted-foreground/60 transition-colors flex items-center gap-1 shrink-0"
+            title="Add tag"
+          >
+            <Tag className="w-3 h-3" />
+            {tags.length > 0 && <span className="text-primary">{tags.length}</span>}
+          </button>
           <Button
             variant="outline"
             size="sm"
@@ -436,6 +471,14 @@ export default function SessionDetail() {
             className="font-mono text-xs h-8 rounded-none border-border hover:border-primary hover:text-primary"
           >
             <Download className="w-3 h-3 mr-1.5" />ZIP
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(`/api/agent/sessions/${sessionId}/export`, "_blank")}
+            className="font-mono text-xs h-8 rounded-none border-border hover:border-primary hover:text-primary"
+          >
+            <FileJson className="w-3 h-3 mr-1.5" />JSON
           </Button>
           {canRerun && (
             <Button
@@ -463,11 +506,67 @@ export default function SessionDetail() {
         </div>
       </header>
 
+      {/* Tags bar */}
+      {(tags.length > 0 || showTagInput) && (
+        <div className="shrink-0 border-b border-border bg-card/40 flex items-center px-4 gap-2 h-8">
+          <Tag className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+          {tags.map((t) => (
+            <span key={t} className="flex items-center gap-0.5 font-mono text-[9px] bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded-sm">
+              {t}
+              <button onClick={() => removeTag(t)} className="ml-0.5 hover:text-destructive transition-colors">
+                <XIcon className="w-2 h-2" />
+              </button>
+            </span>
+          ))}
+          {showTagInput ? (
+            <input
+              autoFocus
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addTag(tagInput);
+                if (e.key === "Escape") { setShowTagInput(false); setTagInput(""); }
+              }}
+              onBlur={() => { if (tagInput.trim()) addTag(tagInput); else { setShowTagInput(false); setTagInput(""); } }}
+              className="font-mono text-[9px] bg-transparent outline-none text-foreground w-24"
+              placeholder="add tag..."
+            />
+          ) : (
+            <button
+              onClick={() => setShowTagInput(true)}
+              className="font-mono text-[9px] text-muted-foreground/40 hover:text-primary transition-colors"
+            >
+              + tag
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Mobile panel switcher */}
+      <div className="shrink-0 border-b border-border bg-card px-2 flex items-center gap-1 md:hidden h-9">
+        {(["workspace", "stream", "telemetry"] as const).map((panel) => (
+          <button
+            key={panel}
+            onClick={() => setMobilePanelView(panel)}
+            className={`font-mono text-[9px] uppercase px-2.5 py-1 flex items-center gap-1 transition-colors ${
+              mobilePanelView === panel
+                ? "bg-primary/20 text-primary border border-primary/20"
+                : "text-muted-foreground hover:text-foreground border border-transparent"
+            }`}
+          >
+            {panel === "workspace" && <FileCode className="w-2.5 h-2.5" />}
+            {panel === "stream" && <Activity className="w-2.5 h-2.5" />}
+            {panel === "telemetry" && <Layers className="w-2.5 h-2.5" />}
+            {panel === "workspace" ? "Files" : panel === "stream" ? "Stream" : "Info"}
+          </button>
+        ))}
+      </div>
+
       {/* Body */}
       <div className="flex-1 flex overflow-hidden">
 
         {/* LEFT: File panel */}
-        <div className="w-1/4 min-w-[220px] max-w-[300px] border-r border-border flex flex-col bg-card">
+        <div className={`w-full md:w-1/4 md:min-w-[220px] md:max-w-[300px] border-r border-border flex-col bg-card ${mobilePanelView === "workspace" ? "flex" : "hidden md:flex"}`}>
           <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-background shrink-0">
             <FileCode className="w-3 h-3 mr-2" />Workspace
             <span className="ml-auto text-[10px]">{files.length} {files.length === 1 ? "file" : "files"}</span>
@@ -577,7 +676,7 @@ export default function SessionDetail() {
         </div>
 
         {/* MIDDLE: Event stream */}
-        <div className="flex-1 border-r border-border flex flex-col bg-background min-w-0">
+        <div className={`flex-1 border-r border-border flex-col bg-background min-w-0 ${mobilePanelView === "stream" ? "flex" : "hidden md:flex"}`}>
           <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-card shrink-0 gap-3">
             <Activity className="w-3 h-3" />
             Execution Stream
@@ -679,7 +778,7 @@ export default function SessionDetail() {
                         </span>
                       )}
                     </div>
-                    <div className={`font-mono text-[11px] whitespace-pre-wrap break-words leading-relaxed relative group ${
+                    <div className={`text-[11px] leading-relaxed relative group ${
                       event.type === "error"
                         ? "text-red-400/90 bg-red-500/10 p-2 border border-red-500/20 rounded-sm"
                         : event.type === "success"
@@ -688,7 +787,13 @@ export default function SessionDetail() {
                         ? "text-foreground/80 bg-muted/30 p-2 border border-border rounded-sm"
                         : "text-foreground/75"
                     }`}>
-                      {event.content}
+                      {(event.type === "thought" || event.type === "plan") ? (
+                        <div className="[&>p]:my-1 [&>p:first-child]:mt-0 [&>p:last-child]:mb-0 [&>ul]:my-1 [&>ul]:pl-4 [&>li]:my-0.5 [&>h1]:font-bold [&>h2]:font-bold [&>h3]:font-bold [&>h1,h2,h3]:text-[11px] [&>h1,h2,h3]:font-mono [&>code]:text-[10px] [&>code]:bg-muted/60 [&>code]:px-1 [&>code]:rounded-sm [&>pre]:bg-muted/30 [&>pre]:p-2 [&>pre]:rounded-sm [&>pre]:overflow-x-auto [&>strong]:text-foreground/95 [&>em]:text-foreground/80 font-sans">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{event.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <span className="font-mono whitespace-pre-wrap break-words">{event.content}</span>
+                      )}
                       {(event.type === "code" || event.type === "error") && (
                         <button
                           onClick={() => handleCopy(event.content, `event-${event.id}`)}
@@ -721,10 +826,10 @@ export default function SessionDetail() {
         </div>
 
         {/* RIGHT: Telemetry / VCS / History */}
-        <div className="w-[320px] shrink-0 flex flex-col bg-card">
+        <div className={`w-full md:w-[320px] md:shrink-0 flex-col bg-card ${mobilePanelView === "telemetry" ? "flex" : "hidden md:flex"}`}>
           <Tabs defaultValue="tests" className="flex-1 flex flex-col overflow-hidden">
             <div className="h-10 border-b border-border bg-background px-2 flex items-center shrink-0">
-              <TabsList className="bg-transparent h-8 p-0 gap-4">
+              <TabsList className="bg-transparent h-8 p-0 gap-3">
                 <TabsTrigger value="tests" className="font-mono text-[10px] uppercase data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-2 h-full">
                   Tests
                 </TabsTrigger>
@@ -733,6 +838,9 @@ export default function SessionDetail() {
                 </TabsTrigger>
                 <TabsTrigger value="history" className="font-mono text-[10px] uppercase data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-2 h-full">
                   History
+                </TabsTrigger>
+                <TabsTrigger value="prompt" className="font-mono text-[10px] uppercase data-[state=active]:bg-transparent data-[state=active]:shadow-none data-[state=active]:text-primary border-b-2 border-transparent data-[state=active]:border-primary rounded-none px-2 h-full">
+                  Prompt
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -1013,6 +1121,86 @@ export default function SessionDetail() {
                         </div>
                       ))
                     )}
+                  </div>
+                </ScrollArea>
+              </TabsContent>
+
+              {/* ── Prompt inspector tab ── */}
+              <TabsContent value="prompt" className="absolute inset-0 m-0 data-[state=active]:flex flex-col overflow-hidden">
+                <ScrollArea className="flex-1">
+                  <div className="p-3 flex flex-col gap-4">
+
+                    {/* Task */}
+                    <div>
+                      <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono flex items-center gap-1">
+                        <Terminal className="w-3 h-3" />
+                        Task Directive
+                      </div>
+                      <div className="bg-background border border-border rounded-sm p-2.5 font-sans text-xs text-foreground/90 leading-relaxed">
+                        {session.task}
+                      </div>
+                    </div>
+
+                    {/* Session context */}
+                    <div>
+                      <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono">
+                        Session Context
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-background border border-border rounded-sm p-2 font-mono">
+                          <div className="text-[9px] text-muted-foreground mb-0.5">RUNTIME</div>
+                          <div className="text-[11px] text-foreground font-bold">{session.language}</div>
+                        </div>
+                        <div className="bg-background border border-border rounded-sm p-2 font-mono">
+                          <div className="text-[9px] text-muted-foreground mb-0.5">MODEL</div>
+                          <div className="text-[11px] text-foreground font-bold">{session.model || "gpt-4.1"}</div>
+                        </div>
+                        <div className="bg-background border border-border rounded-sm p-2 font-mono">
+                          <div className="text-[9px] text-muted-foreground mb-0.5">ITERATIONS</div>
+                          <div className="text-[11px] text-foreground font-bold">{session.iterations} / 5</div>
+                        </div>
+                        <div className="bg-background border border-border rounded-sm p-2 font-mono">
+                          <div className="text-[9px] text-muted-foreground mb-0.5">STATUS</div>
+                          <div className={`text-[11px] font-bold ${(STATUS_PHASES[session.status] ?? STATUS_PHASES.pending).color}`}>
+                            {(STATUS_PHASES[session.status] ?? STATUS_PHASES.pending).label}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* System prompt overview */}
+                    <div>
+                      <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono">
+                        System Prompt
+                      </div>
+                      <div className="bg-muted/20 border border-border rounded-sm p-2.5 font-mono text-[10px] text-muted-foreground space-y-1.5">
+                        <div className="text-foreground/70">You are an expert {session.language} developer.</div>
+                        <div>Your task: analyze the requirements, plan a solution, write clean &amp; tested code.</div>
+                        <div>Rules: always write a test file • keep main.{session.language === "python" ? "py" : "js"} as entry point • fix failing tests within {5} iterations.</div>
+                        <div>On each iteration: think → plan → write code → run tests → fix errors.</div>
+                      </div>
+                    </div>
+
+                    {/* Thought history summary */}
+                    {events.filter(e => e.type === "thought").length > 0 && (
+                      <div>
+                        <div className="text-[10px] text-muted-foreground uppercase mb-1.5 font-mono flex items-center gap-1">
+                          Thought Log
+                          <span className="text-muted-foreground/50">({events.filter(e => e.type === "thought").length})</span>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          {events.filter(e => e.type === "thought").map((e) => (
+                            <div key={e.id} className="bg-blue-500/5 border border-blue-500/20 rounded-sm p-2">
+                              <div className="font-mono text-[9px] text-blue-400/70 mb-1">IT:{e.iteration} · {safeFormat(e.createdAt, "HH:mm:ss")}</div>
+                              <div className="font-mono text-[10px] text-foreground/75 leading-relaxed line-clamp-3">
+                                {e.content.slice(0, 200)}{e.content.length > 200 ? "…" : ""}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                 </ScrollArea>
               </TabsContent>

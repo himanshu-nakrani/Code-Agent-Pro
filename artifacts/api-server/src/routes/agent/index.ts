@@ -189,6 +189,38 @@ router.get("/agent/sessions/:id/download", async (req, res): Promise<void> => {
   await archive.finalize();
 });
 
+// Export session as JSON
+router.get("/agent/sessions/:id/export", async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw, 10);
+  if (isNaN(id)) {
+    res.status(400).json({ error: "Invalid session ID" });
+    return;
+  }
+
+  const [session] = await db.select().from(sessionsTable).where(eq(sessionsTable.id, id));
+  if (!session) {
+    res.status(404).json({ error: "Session not found" });
+    return;
+  }
+
+  const files = await db.select().from(agentFilesTable).where(eq(agentFilesTable.sessionId, id));
+  const events = await db.select().from(agentEventsTable)
+    .where(eq(agentEventsTable.sessionId, id))
+    .orderBy(agentEventsTable.createdAt);
+  const testResults = await db.select().from(testResultsTable)
+    .where(eq(testResultsTable.sessionId, id))
+    .orderBy(testResultsTable.createdAt);
+
+  const slug = session.task.slice(0, 30).replace(/[^a-z0-9]/gi, "_").toLowerCase();
+  res.setHeader("Content-Disposition", `attachment; filename="forge_session_${id}_${slug}.json"`);
+  res.json({
+    session: { ...session, files, events, testResults },
+    exportedAt: new Date().toISOString(),
+    version: "1.0",
+  });
+});
+
 // Cancel session
 router.post("/agent/sessions/:id/cancel", async (req, res): Promise<void> => {
   const params = CancelSessionParams.safeParse(req.params);
@@ -332,6 +364,33 @@ router.get("/agent/stats", async (_req, res): Promise<void> => {
     avgIterations: Math.round(Number(totals?.avgIter || 0) * 10) / 10,
     totalFilesGenerated: Number(fileCount?.total || 0),
   });
+});
+
+// Per-model performance stats
+router.get("/agent/model-stats", async (_req, res): Promise<void> => {
+  const rows = await db.select({
+    model: sessionsTable.model,
+    total: sql<number>`count(*)`,
+    completed: sql<number>`count(*) filter (where status = 'done')`,
+    failed: sql<number>`count(*) filter (where status = 'failed')`,
+    avgIter: avg(sessionsTable.iterations),
+  }).from(sessionsTable).groupBy(sessionsTable.model);
+
+  const result = rows.map((r) => {
+    const total = Number(r.total || 0);
+    const completed = Number(r.completed || 0);
+    const failed = Number(r.failed || 0);
+    return {
+      model: r.model || "unknown",
+      totalSessions: total,
+      completedSessions: completed,
+      failedSessions: failed,
+      successRate: total > 0 ? Math.round((completed / total) * 1000) / 10 : 0,
+      avgIterations: Math.round(Number(r.avgIter || 0) * 10) / 10,
+    };
+  });
+
+  res.json(result);
 });
 
 // Git status

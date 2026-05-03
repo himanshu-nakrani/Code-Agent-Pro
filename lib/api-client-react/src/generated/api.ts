@@ -29,9 +29,11 @@ import type {
   GitStatus,
   HealthStatus,
   Message,
+  ModelStat,
   SendOpenaiMessageBody,
   Session,
   SessionDetail,
+  SessionExport,
   TestResult,
   UpdateFileBody,
 } from "./api.schemas";
@@ -1209,6 +1211,168 @@ export function useGetGitLog<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetGitLogQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Export session data as JSON
+ */
+export const getExportSessionUrl = (id: number) => {
+  return `/api/agent/sessions/${id}/export`;
+};
+
+export const exportSession = async (
+  id: number,
+  options?: RequestInit,
+): Promise<SessionExport> => {
+  return customFetch<SessionExport>(getExportSessionUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportSessionQueryKey = (id: number) => {
+  return [`/api/agent/sessions/${id}/export`] as const;
+};
+
+export const getExportSessionQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportSession>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportSession>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getExportSessionQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof exportSession>>> = ({
+    signal,
+  }) => exportSession(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportSession>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportSessionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportSession>>
+>;
+export type ExportSessionQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Export session data as JSON
+ */
+
+export function useExportSession<
+  TData = Awaited<ReturnType<typeof exportSession>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: number,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportSession>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportSessionQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get per-model performance statistics
+ */
+export const getGetModelStatsUrl = () => {
+  return `/api/agent/model-stats`;
+};
+
+export const getModelStats = async (
+  options?: RequestInit,
+): Promise<ModelStat[]> => {
+  return customFetch<ModelStat[]>(getGetModelStatsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetModelStatsQueryKey = () => {
+  return [`/api/agent/model-stats`] as const;
+};
+
+export const getGetModelStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getModelStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getModelStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetModelStatsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getModelStats>>> = ({
+    signal,
+  }) => getModelStats({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getModelStats>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetModelStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getModelStats>>
+>;
+export type GetModelStatsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get per-model performance statistics
+ */
+
+export function useGetModelStats<
+  TData = Awaited<ReturnType<typeof getModelStats>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getModelStats>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetModelStatsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

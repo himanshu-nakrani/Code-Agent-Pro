@@ -164,6 +164,21 @@ export interface UpdateFileBody {
   content: string;
 }
 
+export interface SessionExport {
+  session: SessionDetail;
+  exportedAt: string;
+  version: string;
+}
+
+export interface ModelStat {
+  model: string;
+  totalSessions: number;
+  completedSessions: number;
+  failedSessions: number;
+  successRate: number;
+  avgIterations: number;
+}
+
 export interface RerunSessionParams {
   id: number;
 }

@@ -301,6 +301,46 @@ paths:
                 items:
                   $ref: "#/components/schemas/GitCommit"
 
+  /agent/sessions/{id}/export:
+    get:
+      operationId: exportSession
+      tags: [agent]
+      summary: Export session data as JSON
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Session export JSON
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionExport"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /agent/model-stats:
+    get:
+      operationId: getModelStats
+      tags: [agent]
+      summary: Get per-model performance statistics
+      responses:
+        "200":
+          description: Model stats array
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ModelStat"
+
   /agent/sessions/{id}/git/commit:
     post:
       operationId: gitCommit
@@ -666,6 +706,43 @@ components:
           type: string
       required:
         - content
+
+    SessionExport:
+      type: object
+      properties:
+        session:
+          $ref: "#/components/schemas/SessionDetail"
+        exportedAt:
+          type: string
+        version:
+          type: string
+      required:
+        - session
+        - exportedAt
+        - version
+
+    ModelStat:
+      type: object
+      properties:
+        model:
+          type: string
+        totalSessions:
+          type: integer
+        completedSessions:
+          type: integer
+        failedSessions:
+          type: integer
+        successRate:
+          type: number
+        avgIterations:
+          type: number
+      required:
+        - model
+        - totalSessions
+        - completedSessions
+        - failedSessions
+        - successRate
+        - avgIterations
 
     RerunSessionParams:
       type: object

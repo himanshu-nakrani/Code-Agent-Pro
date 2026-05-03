@@ -304,6 +304,90 @@ export const GetGitLogResponseItem = zod.object({
 export const GetGitLogResponse = zod.array(GetGitLogResponseItem);
 
 /**
+ * @summary Export session data as JSON
+ */
+export const ExportSessionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const ExportSessionResponse = zod.object({
+  session: zod.object({
+    id: zod.number(),
+    task: zod.string(),
+    language: zod.string(),
+    model: zod.string(),
+    status: zod.enum([
+      "pending",
+      "planning",
+      "coding",
+      "testing",
+      "iterating",
+      "done",
+      "failed",
+      "cancelled",
+    ]),
+    iterations: zod.number(),
+    createdAt: zod.string(),
+    updatedAt: zod.string(),
+    files: zod.array(
+      zod.object({
+        id: zod.number(),
+        sessionId: zod.number(),
+        name: zod.string(),
+        content: zod.string(),
+        language: zod.string(),
+        createdAt: zod.string(),
+        updatedAt: zod.string(),
+      }),
+    ),
+    events: zod.array(
+      zod.object({
+        id: zod.number(),
+        sessionId: zod.number(),
+        type: zod.enum([
+          "thought",
+          "plan",
+          "code",
+          "test",
+          "error",
+          "success",
+          "git",
+        ]),
+        content: zod.string(),
+        iteration: zod.number(),
+        createdAt: zod.string(),
+      }),
+    ),
+    testResults: zod.array(
+      zod.object({
+        id: zod.number(),
+        sessionId: zod.number(),
+        passed: zod.boolean(),
+        output: zod.string(),
+        errors: zod.string().nullish(),
+        iteration: zod.number(),
+        createdAt: zod.string(),
+      }),
+    ),
+  }),
+  exportedAt: zod.string(),
+  version: zod.string(),
+});
+
+/**
+ * @summary Get per-model performance statistics
+ */
+export const GetModelStatsResponseItem = zod.object({
+  model: zod.string(),
+  totalSessions: zod.number(),
+  completedSessions: zod.number(),
+  failedSessions: zod.number(),
+  successRate: zod.number(),
+  avgIterations: zod.number(),
+});
+export const GetModelStatsResponse = zod.array(GetModelStatsResponseItem);
+
+/**
  * @summary Commit current changes in a session workspace
  */
 export const GitCommitParams = zod.object({

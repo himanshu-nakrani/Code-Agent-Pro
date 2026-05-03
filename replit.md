@@ -29,7 +29,13 @@
 - 20+ error type detection (SYNTAX_ERROR, MISSING_MODULE, TYPE_ERROR, etc.) with targeted fix prompts
 - Git integration per session (auto-init, auto-commit at each iteration, manual commit UI)
 - SSE stream for real-time event push (`/api/agent/sessions/:id/stream`) with exponential backoff reconnection
-- Multi-panel session detail: file viewer/editor, event log with search/filter, test results panel, VCS panel, git history
+- Multi-panel session detail: file viewer/editor, event log with search/filter, test results panel, VCS panel, git history, Prompt inspector tab
+- **Markdown rendering**: plan + thought events rendered via react-markdown + remark-gfm (bold, lists, inline code, headers)
+- **Session tags**: localStorage-persisted per-session tags with add/remove UI (`forge-tags-${sessionId}`)
+- **JSON export**: `/api/agent/sessions/:id/export` — full structured JSON dump (session + files + events)
+- **Model stats widget**: dashboard shows per-model performance card (success %, avg iterations, runs)
+- **Mobile panel switcher**: badges select Workspace / Stream / Telemetry on narrow viewports
+- **Prompt inspector tab**: 4th right-panel tab showing task directive, session context grid, system prompt summary, thought log
 - Test result parsing: extracts individual test names from pytest/jest/mocha/tap output
 - **Error summary panel**: shown in Tests tab when session fails — highlights the last failed test output with copy button
 - **Copy buttons**: on file viewer header and code/error event blocks (clipboard icon → checkmark animation)
@@ -81,9 +87,5 @@
 - Applied via `data-theme` attribute on `<html>`
 - Default: `warm` (32° hue orange/amber palette)
 - Switcher in `artifacts/ai-agent/src/components/theme-switcher.tsx`
-
-## Known Pre-existing Issues
-
-- `artifacts/api-server/src/routes/openai/index.ts` has TypeScript errors (UUID string vs integer ID mismatch in Drizzle) — pre-existing, unrelated to agent functionality
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
