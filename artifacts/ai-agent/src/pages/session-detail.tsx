@@ -137,6 +137,21 @@ export default function SessionDetail() {
 
   const selectedFile = files.find((f) => f.id === (selectedFileId ?? files[0]?.id));
 
+  const stats = useMemo(() => {
+    const errorCount = events.filter((e) => e.type === "error").length;
+    const successCount = events.filter((e) => e.type === "success").length;
+    const testCount = testResults.length;
+    const passedTests = testResults.filter((t) => t.passed).length;
+    const failedTests = testResults.filter((t) => !t.passed).length;
+    const eventTypes = {
+      thought: events.filter((e) => e.type === "thought").length,
+      plan: events.filter((e) => e.type === "plan").length,
+      code: events.filter((e) => e.type === "code").length,
+      test: events.filter((e) => e.type === "test").length,
+    };
+    return { errorCount, successCount, passedTests, failedTests, testCount, eventTypes };
+  }, [events, testResults]);
+
   const invalidateAll = () => {
     if (!sessionId) return;
     queryClient.invalidateQueries({ queryKey: getGetSessionQueryKey(sessionId) });
@@ -188,8 +203,13 @@ export default function SessionDetail() {
           {isConnected && isActive && <Badge variant="outline" className="font-mono text-[10px] rounded-none uppercase border-emerald-500/30 text-emerald-400 bg-emerald-500/10 shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse" />LIVE</Badge>}
           <div className="font-mono text-xs text-muted-foreground truncate hidden md:block max-w-[300px]">{session.task}</div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="font-mono text-xs text-muted-foreground hidden md:block">ITER: <span className="text-foreground">{session.iterations}</span></div>
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="flex flex-col gap-1 hidden md:flex">
+            <div className="font-mono text-xs text-muted-foreground">ITER: <span className="text-foreground font-bold">{session.iterations}</span></div>
+            <div className="w-20 h-1 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-gradient-to-r from-blue-500 to-emerald-500" style={{ width: `${Math.min((session.iterations / 5) * 100, 100)}%` }} />
+            </div>
+          </div>
           <Button variant="outline" size="sm" onClick={() => window.open(`/api/agent/sessions/${sessionId}/download`, "_blank")} className="font-mono text-xs h-8 rounded-none border-border hover:border-primary hover:text-primary"><Download className="w-3 h-3 mr-1.5" />ZIP</Button>
           {canRerun && <Button variant="outline" size="sm" onClick={handleRerun} disabled={rerunSession.isPending} className="font-mono text-xs h-8 rounded-none border-primary/40 text-primary hover:bg-primary/10"><RefreshCw className={`w-3 h-3 mr-1.5 ${rerunSession.isPending ? "animate-spin" : ""}`} />RERUN</Button>}
           {isActive && <Button variant="destructive" size="sm" onClick={handleCancel} disabled={cancelSession.isPending} className="font-mono text-xs h-8 rounded-none"><Square className="w-3 h-3 mr-1.5" />ABORT</Button>}
@@ -198,7 +218,12 @@ export default function SessionDetail() {
 
       <div className="flex-1 flex overflow-hidden">
         <div className="w-1/4 min-w-[240px] max-w-[320px] border-r border-border flex flex-col bg-card">
-          <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-background shrink-0"><FileCode className="w-3 h-3 mr-2" />Workspace<span className="ml-auto text-[10px]">{files.length} files</span></div>
+          <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-background shrink-0"><FileCode className="w-3 h-3 mr-2" />Workspace
+            <div className="ml-auto flex items-center gap-2 text-[10px]">
+              <span>{files.length} {files.length === 1 ? "file" : "files"}</span>
+              {files.length > 0 && <div className="w-20 h-1 bg-muted rounded-full" style={{ background: `linear-gradient(90deg, #3b82f6 0%, #10b981 ${Math.min((files.length / 10) * 100, 100)}%)` }} />}
+            </div>
+          </div>
           <div className="border-b border-border shrink-0" style={{ maxHeight: "35%" }}>
             <ScrollArea className="h-full"><div className="p-2 flex flex-col gap-0.5">{files.length === 0 ? <div className="text-center p-4 font-mono text-[10px] text-muted-foreground">NO_FILES_YET</div> : files.map((file) => <button key={file.id} onClick={() => { setSelectedFileId(file.id); setEditingFileId(null); }} className={`text-left px-2 py-1.5 font-mono text-xs truncate transition-colors flex items-center gap-2 w-full ${selectedFile?.id === file.id ? "bg-primary/10 text-primary border-l-2 border-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"}`}><FileCode className="w-3 h-3 shrink-0 opacity-50" /><span className="truncate">{file.name}</span></button>)}</div></ScrollArea>
           </div>
@@ -208,7 +233,14 @@ export default function SessionDetail() {
         </div>
 
         <div className="flex-1 border-r border-border flex flex-col bg-background min-w-0">
-          <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-card shrink-0 gap-3"><Activity className="w-3 h-3" />Execution Stream<span className="ml-auto text-[10px]">{filteredEvents.length} / {events.length} events</span></div>
+          <div className="h-10 border-b border-border flex items-center px-3 font-mono text-xs text-muted-foreground uppercase bg-card shrink-0 gap-3"><Activity className="w-3 h-3" />Execution Stream
+            <div className="ml-auto flex items-center gap-1 text-[10px]">
+              {stats.eventTypes.thought > 0 && <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/30 text-[9px] px-1.5">{stats.eventTypes.thought}×</Badge>}
+              {stats.eventTypes.plan > 0 && <Badge variant="outline" className="bg-violet-500/10 text-violet-400 border-violet-500/30 text-[9px] px-1.5">{stats.eventTypes.plan}×</Badge>}
+              {stats.eventTypes.code > 0 && <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-[9px] px-1.5">{stats.eventTypes.code}×</Badge>}
+              {stats.errorCount > 0 && <Badge className="bg-red-500/20 text-red-400 border-red-500/30 text-[9px] px-1.5">{stats.errorCount}!</Badge>}
+            </div>
+          </div>
           <div className="h-12 border-b border-border bg-card/40 px-3 flex items-center gap-2 shrink-0">
             <div className="relative flex-1"><Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" /><Input value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} placeholder="Search telemetry..." className="h-8 pl-7 font-mono text-xs rounded-none bg-background" /></div>
             <div className="w-[140px]"><select value={eventTypeFilter} onChange={(e) => setEventTypeFilter(e.target.value)} className="h-8 w-full border border-input bg-background px-2 text-xs font-mono rounded-none"><option value="all">All</option><option value="thought">thought</option><option value="plan">plan</option><option value="code">code</option><option value="test">test</option><option value="error">error</option><option value="success">success</option><option value="git">git</option></select></div>
@@ -233,6 +265,13 @@ export default function SessionDetail() {
             </div>
             <div className="flex-1 overflow-hidden relative">
               <TabsContent value="tests" className="absolute inset-0 m-0 data-[state=active]:flex flex-col overflow-hidden">
+                <div className="border-b border-border bg-card/40 p-2 shrink-0">
+                  <div className="grid grid-cols-3 gap-2 font-mono text-[9px]">
+                    <div className="border border-border bg-background p-1.5 text-center"><div className="text-emerald-400 font-bold">{stats.passedTests}</div><div className="text-muted-foreground">passed</div></div>
+                    <div className="border border-border bg-background p-1.5 text-center"><div className="text-red-400 font-bold">{stats.failedTests}</div><div className="text-muted-foreground">failed</div></div>
+                    <div className="border border-border bg-background p-1.5 text-center"><div className="text-sky-400 font-bold">{stats.testCount}</div><div className="text-muted-foreground">total</div></div>
+                  </div>
+                </div>
                 <ScrollArea className="flex-1">
                   <div className="p-3 flex flex-col gap-3">
                     {testResults.length === 0 ? <div className="text-center p-6 font-mono text-[10px] text-muted-foreground">NO_TEST_DATA</div> : testResults.map((test) => <div key={test.id} className="border border-border bg-background flex flex-col"><div className={`h-8 px-2 flex items-center gap-2 border-b border-border ${test.passed ? "bg-emerald-500/10" : "bg-red-500/10"}`}>{test.passed ? <CheckCircle2 className="w-3 h-3 text-emerald-500" /> : <XCircle className="w-3 h-3 text-red-500" />}<span className="font-mono text-[10px] uppercase font-bold">Iteration {test.iteration}</span><span className="font-mono text-[9px] text-muted-foreground ml-auto">{safeFormat(test.createdAt, "HH:mm:ss")}</span></div><div className="p-2 font-mono text-[10px] whitespace-pre-wrap break-words max-h-[120px] overflow-y-auto">{test.output && <div className="text-muted-foreground">{test.output.slice(0, 400)}</div>}{test.errors && <div className="text-red-400 mt-1 bg-red-500/10 p-1 border border-red-500/20">{test.errors.slice(0, 300)}</div>}</div></div>) }
@@ -266,9 +305,12 @@ export default function SessionDetail() {
                 </ScrollArea>
               </TabsContent>
               <TabsContent value="history" className="absolute inset-0 m-0 data-[state=active]:flex flex-col overflow-hidden">
+                <div className="border-b border-border bg-card/40 p-2 shrink-0">
+                  <div className="font-mono text-[9px] text-muted-foreground">Total commits: <span className="text-foreground font-bold">{gitLog.length}</span></div>
+                </div>
                 <ScrollArea className="flex-1">
                   <div className="p-3 flex flex-col gap-3">
-                    {gitLog.length === 0 ? <div className="text-center p-6 font-mono text-[10px] text-muted-foreground">NO_COMMITS</div> : gitLog.map((commit) => <div key={commit.hash} className="border border-border bg-background p-2"><div className="flex items-center gap-2 mb-1"><span className="font-mono text-[10px] text-primary">{commit.hash}</span><span className="font-mono text-[9px] text-muted-foreground ml-auto">{safeFormat(commit.date, "MMM d, HH:mm")}</span></div><div className="font-mono text-[10px] text-foreground/90 break-words">{commit.message}</div><div className="font-mono text-[9px] text-muted-foreground mt-1">{commit.author}</div></div>) }
+                    {gitLog.length === 0 ? <div className="text-center p-6 font-mono text-[10px] text-muted-foreground">NO_COMMITS</div> : gitLog.map((commit, idx) => <div key={commit.hash} className={`border-l-4 pl-2 py-1 ${idx === 0 ? "border-l-emerald-500" : "border-l-muted-foreground/30"}`}><div className="flex items-center gap-2 mb-1"><span className="font-mono text-[10px] text-primary">{commit.hash}</span><span className="font-mono text-[9px] text-muted-foreground ml-auto">{safeFormat(commit.date, "MMM d, HH:mm")}</span></div><div className="font-mono text-[10px] text-foreground/90 break-words">{commit.message}</div><div className="font-mono text-[9px] text-muted-foreground mt-1">{commit.author}</div></div>) }
                   </div>
                 </ScrollArea>
               </TabsContent>
